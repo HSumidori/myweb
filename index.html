@@ -1,0 +1,2201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="color-scheme" content="dark" />
+<title>Galgame Player</title>
+<style>
+/* ==========================================================================
+   0. 主题变量 / 尺寸变量
+   --cg-* 由 JS 依据 meta.theme 覆盖；其余为布局尺度，用 clamp + dvh 做响应式
+   ========================================================================== */
+:root{
+  --cg-primary:#ff8fb1;
+  --cg-accent:#8fb1ff;
+  --cg-bg:#101425;
+  --cg-primary-soft:rgba(255,143,177,.20);
+  --cg-accent-soft:rgba(143,177,255,.20);
+  --cg-ink:#f2f4ff;
+  --cg-ink-dim:rgba(233,238,255,.68);
+  --cg-panel:rgba(10,13,26,.72);
+  --cg-panel-strong:rgba(9,11,22,.92);
+  --cg-stroke:rgba(255,255,255,.14);
+
+  --cg-app-h:100vh;
+  --cg-app-h:100dvh;
+  --cg-pad-t:env(safe-area-inset-top,0px);
+  --cg-pad-b:env(safe-area-inset-bottom,0px);
+  --cg-pad-l:env(safe-area-inset-left,0px);
+  --cg-pad-r:env(safe-area-inset-right,0px);
+
+  --cg-font-base:16px;
+  --cg-dialog-font:19px;
+  --cg-title-font:clamp(30px,7.6vw,58px);
+  --cg-sprite-h:52vh;
+  --cg-sprite-bottom:18vh;
+  --cg-sprite-w:min(38vw,340px);
+  --cg-dialog-pad:18px 22px;
+  --cg-radius:16px;
+}
+/* 字号档位（设置面板写入 data-fontsize） */
+html[data-fontsize="small"]{ --cg-dialog-font:16px; --cg-font-base:15px; }
+html[data-fontsize="medium"]{ --cg-dialog-font:19px; --cg-font-base:16px; }
+html[data-fontsize="large"]{ --cg-dialog-font:23px; --cg-font-base:17px; }
+
+/* ==========================================================================
+   1. 基础重置
+   ========================================================================== */
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; height:100%; overflow:hidden; background:var(--cg-bg); }
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB",
+    "Microsoft YaHei","Noto Sans CJK SC",sans-serif;
+  font-size:var(--cg-font-base);
+  color:var(--cg-ink);
+  -webkit-font-smoothing:antialiased;
+  -webkit-tap-highlight-color:transparent;
+  user-select:none;
+}
+button{ font:inherit; color:inherit; cursor:pointer; }
+button:disabled{ cursor:not-allowed; }
+::-webkit-scrollbar{ width:8px; height:8px; }
+::-webkit-scrollbar-thumb{ background:rgba(255,255,255,.22); border-radius:8px; }
+::-webkit-scrollbar-track{ background:transparent; }
+
+#app{
+  position:relative;
+  width:100%;
+  height:var(--cg-app-h);
+  overflow:hidden;
+  background:var(--cg-bg);
+}
+.hidden{ display:none !important; }
+/* 屏幕层：同一时刻只显示一层（title / game / ending） */
+.screen{
+  position:absolute; inset:0;
+  display:flex; flex-direction:column;
+  padding:calc(var(--cg-pad-t) + 10px) calc(var(--cg-pad-r) + 12px)
+          calc(var(--cg-pad-b) + 10px) calc(var(--cg-pad-l) + 12px);
+}
+.layer{ position:absolute; inset:0; pointer-events:none; }
+.layer > *{ pointer-events:auto; }
+
+/* ==========================================================================
+   2. 标题画面
+   ========================================================================== */
+#title-screen{
+  align-items:center; justify-content:center;
+  gap:clamp(10px,2vh,22px);
+  text-align:center;
+  overflow:hidden;
+  background:
+    radial-gradient(120% 80% at 12% 0%,var(--cg-primary-soft),transparent 60%),
+    radial-gradient(110% 90% at 88% 100%,var(--cg-accent-soft),transparent 62%),
+    var(--cg-bg);
+}
+.title-aurora{
+  position:absolute; inset:-20%;
+  background:
+    radial-gradient(closest-side,var(--cg-primary-soft),transparent 70%) 18% 22%/46% 46% no-repeat,
+    radial-gradient(closest-side,var(--cg-accent-soft),transparent 70%) 82% 74%/52% 52% no-repeat;
+  filter:blur(8px);
+  animation:aurora 18s ease-in-out infinite alternate;
+}
+@keyframes aurora{
+  from{ transform:translate3d(-2%,-1%,0) scale(1); }
+  to{ transform:translate3d(3%,2%,0) scale(1.08); }
+}
+.title-card{
+  position:relative; z-index:1;
+  width:min(680px,92vw);
+  max-height:calc(var(--cg-app-h) - 40px);
+  overflow-y:auto;
+  display:flex; flex-direction:column; align-items:center;
+  gap:clamp(8px,1.6vh,16px);
+  padding:clamp(18px,3.4vh,34px) clamp(16px,3.6vw,34px);
+  border-radius:22px;
+  border:1px solid var(--cg-stroke);
+  background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,.015));
+  backdrop-filter:blur(10px);
+  -webkit-backdrop-filter:blur(10px);
+  box-shadow:0 24px 70px rgba(0,0,0,.45);
+}
+.title-main{
+  margin:0;
+  font-size:var(--cg-title-font);
+  line-height:1.12;
+  letter-spacing:.04em;
+  font-weight:800;
+  background:linear-gradient(100deg,#fff 8%,var(--cg-primary) 46%,var(--cg-accent) 96%);
+  -webkit-background-clip:text; background-clip:text;
+  -webkit-text-fill-color:transparent; color:transparent;
+  text-shadow:0 6px 30px rgba(0,0,0,.35);
+}
+.title-sub{
+  margin:0; font-size:clamp(12px,1.6vw,15px);
+  letter-spacing:.28em; text-transform:uppercase; color:var(--cg-ink-dim);
+}
+.title-synopsis{
+  margin:0; max-width:46ch;
+  font-size:clamp(13px,1.5vw,15px); line-height:1.75; color:var(--cg-ink-dim);
+}
+.title-tags{ display:flex; flex-wrap:wrap; gap:6px; justify-content:center; }
+.tag{
+  font-size:12px; padding:3px 10px; border-radius:999px;
+  border:1px solid color-mix(in srgb,var(--cg-primary) 45%,transparent);
+  background:var(--cg-primary-soft); color:var(--cg-ink);
+}
+.title-buttons{
+  display:flex; flex-direction:column; gap:10px;
+  width:min(320px,80vw); margin-top:clamp(4px,1.2vh,14px);
+}
+.btn{
+  display:flex; align-items:center; justify-content:center; gap:8px;
+  min-height:46px; padding:11px 18px;
+  border-radius:14px; border:1px solid var(--cg-stroke);
+  background:rgba(255,255,255,.07);
+  color:var(--cg-ink); font-size:16px; letter-spacing:.06em;
+  transition:transform .14s ease,background .2s ease,border-color .2s ease,box-shadow .2s ease;
+}
+.btn:hover:not(:disabled){ background:rgba(255,255,255,.14); border-color:rgba(255,255,255,.3); }
+.btn:active:not(:disabled){ transform:scale(.97); }
+.btn:disabled{ opacity:.42; }
+.btn-main{
+  background:linear-gradient(120deg,var(--cg-primary),var(--cg-accent));
+  border-color:transparent; color:#16182a; font-weight:700;
+  box-shadow:0 10px 26px color-mix(in srgb,var(--cg-primary) 32%,transparent);
+}
+.btn-main:hover:not(:disabled){ filter:brightness(1.08); background:linear-gradient(120deg,var(--cg-primary),var(--cg-accent)); }
+.btn-ghost{ background:rgba(255,255,255,.04); }
+.btn-sm{ min-height:36px; padding:6px 12px; font-size:13px; border-radius:10px; letter-spacing:.02em; }
+.title-foot{ position:relative; z-index:1; font-size:12px; color:var(--cg-ink-dim); opacity:.85; }
+.title-warn{
+  position:relative; z-index:1; max-width:min(560px,90vw);
+  font-size:13px; line-height:1.7; color:#ffd9a3;
+  border:1px dashed rgba(255,200,130,.5); border-radius:12px;
+  background:rgba(255,180,90,.10); padding:10px 14px;
+}
+
+/* ==========================================================================
+   3. 游戏画面：背景 / 立绘 / 对话框
+   ========================================================================== */
+#game-screen{ padding:0; }
+.bg-layer{ position:absolute; inset:0; background:var(--cg-bg); }
+.bg{
+  position:absolute; inset:0;
+  background-size:cover; background-position:center center; background-repeat:no-repeat;
+  opacity:0; transition:opacity .62s ease;
+}
+.bg.active{ opacity:1; }
+.bg-vignette{
+  position:absolute; inset:0; pointer-events:none;
+  background:radial-gradient(120% 90% at 50% 24%,transparent 42%,rgba(0,0,0,.30) 100%);
+}
+.sprite-layer{ position:absolute; inset:0; pointer-events:none; }
+.sprite-slot{
+  position:absolute; bottom:calc(var(--cg-sprite-bottom) + var(--cg-pad-b));
+  width:var(--cg-sprite-w); height:var(--cg-sprite-h);
+  opacity:0; transform:translateY(34px) scale(.95);
+  transition:opacity .38s ease,transform .38s cubic-bezier(.22,.68,.24,1);
+  will-change:opacity,transform;
+}
+/* 选项阶段：立绘略微压暗后退，让选项成为视觉焦点 */
+.sprite-layer{ transition:filter .28s ease; }
+#game-screen[data-phase="choice"] .sprite-layer{ filter:blur(2px) brightness(.82); }
+.sprite-slot.in{ opacity:1; transform:none; }
+.sprite-slot.leaving{ opacity:0; transform:translateY(20px) scale(.97); }
+.sprite-slot[data-pos="left"]{ left:calc(2vw + var(--cg-pad-l)); }
+.sprite-slot[data-pos="center"]{ left:50%; margin-left:calc(var(--cg-sprite-w) / -2); }
+.sprite-slot[data-pos="right"]{ right:calc(2vw + var(--cg-pad-r)); }
+.sprite-inner{ position:relative; width:100%; height:100%; }
+/* 渐变占位：把 gradient 里的颜色切成竖条格子，避免 innerHTML 内联 style 里出现逗号问题 */
+.sprite-grain{ position:absolute; inset:0; display:flex; border-radius:inherit; overflow:hidden; }
+.sprite-grain > i{ flex:1 1 0; }
+.sprite-img{
+  position:absolute; inset:0; width:100%; height:100%;
+  object-fit:contain; object-position:bottom center;
+  filter:drop-shadow(0 14px 34px rgba(0,0,0,.5));
+}
+.sprite-slot[data-pos="right"] .sprite-img{ transform:scaleX(-1); }
+.sprite-placeholder{
+  position:absolute; inset:0;
+  display:flex; align-items:center; justify-content:center;
+  border-radius:46% 46% 20% 20% / 30% 30% 12% 12%;
+  border:1px solid rgba(255,255,255,.26);
+  box-shadow:inset 0 -34px 60px rgba(0,0,0,.22),0 16px 38px rgba(0,0,0,.36);
+  overflow:hidden;
+}
+/* 立绘占位徽记：emoji 叠在柔和光晕上，让占位更像“角色”而不是一块纯色 */
+.sprite-emoji{
+  position:relative; z-index:2;
+  display:grid; place-items:center;
+  width:clamp(92px,15vh,164px); height:clamp(92px,15vh,164px);
+  border-radius:50%;
+  font-size:clamp(46px,8.4vh,92px); line-height:1;
+  background:radial-gradient(closest-side,rgba(255,255,255,.95),rgba(255,255,255,.55) 60%,rgba(255,255,255,0));
+  box-shadow:0 10px 34px rgba(0,0,0,.22),0 0 0 10px rgba(255,255,255,.14);
+  filter:drop-shadow(0 8px 16px rgba(0,0,0,.28));
+  animation:bob 3.6s ease-in-out infinite alternate;
+}
+@keyframes bob{ from{ transform:translateY(-6px); } to{ transform:translateY(6px); } }
+.sprite-name{
+  position:absolute; z-index:3;
+  left:50%; bottom:-4px; transform:translateX(-50%);
+  font-size:12px; padding:2px 10px; border-radius:999px; white-space:nowrap;
+  background:rgba(6,8,18,.6); border:1px solid var(--cg-stroke); color:var(--cg-ink-dim);
+}
+
+/* 对话框 */
+.dialogue-box{
+  position:absolute; z-index:30;
+  left:calc(var(--cg-pad-l) + 2vw); right:calc(var(--cg-pad-r) + 2vw);
+  bottom:calc(var(--cg-pad-b) + 1.5vh);
+  min-height:min(30vh,230px);
+  padding:var(--cg-dialog-pad);
+  display:flex; flex-direction:column; justify-content:flex-end;
+  border-radius:var(--cg-radius);
+  border:1px solid var(--cg-stroke);
+  background:linear-gradient(180deg,rgba(13,17,32,.95),rgba(7,9,18,.985));
+  backdrop-filter:blur(9px); -webkit-backdrop-filter:blur(9px);
+  box-shadow:0 18px 48px rgba(0,0,0,.5);
+  cursor:pointer;
+}
+.dialogue-box::before{
+  content:""; position:absolute; left:0; right:0; top:-1px; height:2px;
+  background:linear-gradient(90deg,transparent,var(--cg-primary),transparent);
+  opacity:.7; border-radius:2px;
+}
+.speaker-name{
+  align-self:flex-start;
+  margin:-6px 0 8px;
+  padding:3px 14px;
+  font-size:calc(var(--cg-dialog-font) * .84);
+  font-weight:700; letter-spacing:.08em;
+  border-radius:999px;
+  background:var(--cg-primary-soft);
+  border:1px solid color-mix(in srgb,var(--cg-primary) 55%,transparent);
+  color:var(--cg-primary);
+}
+.dialogue-text{
+  flex:1; min-height:3.4em;
+  font-size:calc(var(--cg-dialog-font) * 1.12);
+  line-height:1.78; letter-spacing:.02em;
+  white-space:pre-wrap; word-break:break-word;
+  overflow-y:auto; max-height:34vh;
+}
+.dialogue-box[data-narration="1"] .dialogue-text{
+  font-style:italic; color:#d9e2ff; opacity:.95;
+  text-align:center; padding:0 6%;
+}
+.dialogue-box[data-narration="1"]{ min-height:min(24vh,190px); }
+.advance-mark{
+  position:absolute; right:16px; bottom:10px;
+  font-size:15px; color:var(--cg-primary); opacity:0;
+  transition:opacity .2s ease;
+}
+.advance-mark.on{ opacity:1; animation:nudge 1.1s ease-in-out infinite; }
+@keyframes nudge{ 0%,100%{ transform:translateY(0); } 50%{ transform:translateY(4px); } }
+.dialogue-box.dialogue-echo{ pointer-events:none; }
+.dialogue-box.dialogue-echo .advance-mark{ display:none; }
+
+/* 选项 */
+/* 选项列表：默认浮在画面中部（横屏/桌面），并由 JS 写入 --choice-lift 精确避开对话框 */
+#choice-list{
+  position:absolute; z-index:40;
+  left:50%; top:50%;
+  transform:translate(-50%,calc(-50% - var(--choice-lift,0px)));
+  width:min(560px,86vw);
+  display:flex; flex-direction:column; align-items:stretch; gap:10px;
+  pointer-events:none;
+  animation:choiceIn .26s ease both;
+}
+@keyframes choiceIn{ from{ opacity:0; } to{ opacity:1; } }
+.choice-prompt{
+  text-align:center; font-size:clamp(13px,1.6vw,16px); color:var(--cg-ink);
+  padding:8px 14px; border-radius:12px;
+  background:rgba(5,7,15,.9); border:1px solid var(--cg-stroke);
+  box-shadow:0 10px 26px rgba(0,0,0,.42);
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+}
+.choice-btn{
+  pointer-events:auto;
+  position:relative;
+  padding:13px 16px;
+  border-radius:13px; border:1px solid rgba(255,255,255,.24);
+  background:linear-gradient(120deg,rgba(18,22,42,.97),rgba(9,11,24,.98));
+  color:var(--cg-ink); text-align:center; font-size:clamp(14px,1.7vw,16px);
+  box-shadow:0 12px 30px rgba(0,0,0,.5);
+  transition:transform .15s ease,border-color .2s ease,background .2s ease;
+}
+.choice-btn:hover{
+  transform:translateY(-2px);
+  border-color:var(--cg-primary);
+  background:linear-gradient(120deg,color-mix(in srgb,var(--cg-primary) 30%,rgba(9,11,24,.98)),rgba(9,11,24,.98));
+}
+.choice-btn:active{ transform:scale(.985); }
+.choice-btn .choice-hint{
+  display:block; margin-top:5px;
+  font-size:12px; color:var(--cg-ink-dim);
+}
+.choice-btn .choice-idx{
+  position:absolute; left:10px; top:50%; transform:translateY(-50%);
+  width:20px; height:20px; line-height:20px; border-radius:50%;
+  font-size:11px; text-align:center; color:var(--cg-ink-dim);
+  border:1px solid var(--cg-stroke);
+}
+
+/* 选项阶段的对话框：只作氛围提示，避免与选项文字重复 */
+#dialogue-box[data-choice="1"]{ opacity:.5; min-height:min(20vh,150px); pointer-events:none; }
+#dialogue-box[data-choice="1"] .advance-mark{ display:none; }
+#dialogue-box[data-choice="1"] .dialogue-text{
+  font-size:calc(var(--cg-dialog-font) * .92); color:var(--cg-ink-dim); text-align:center;
+}
+
+/* 快捷工具栏 */
+.quick-bar{
+  position:absolute; z-index:35;
+  right:calc(var(--cg-pad-r) + 10px); top:calc(var(--cg-pad-t) + 8px);
+  display:flex; gap:6px;
+}
+.quick-btn{
+  width:38px; height:38px; border-radius:11px;
+  display:grid; place-items:center; font-size:16px;
+  border:1px solid var(--cg-stroke); background:rgba(8,10,20,.6);
+  color:var(--cg-ink); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+}
+.quick-btn:hover{ background:rgba(255,255,255,.16); }
+.quick-btn.on{
+  background:linear-gradient(120deg,var(--cg-primary),var(--cg-accent));
+  color:#14162a; font-weight:700; border-color:transparent;
+}
+.chapter-chip{
+  position:absolute; z-index:35;
+  left:calc(var(--cg-pad-l) + 12px); top:calc(var(--cg-pad-t) + 10px);
+  font-size:12px; padding:5px 12px; border-radius:999px;
+  background:rgba(8,10,20,.6); border:1px solid var(--cg-stroke); color:var(--cg-ink-dim);
+  backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);
+}
+.toast{
+  position:absolute; z-index:80; left:50%; top:calc(var(--cg-pad-t) + 16px);
+  transform:translate(-50%,-14px);
+  padding:9px 18px; border-radius:999px;
+  font-size:13px; background:rgba(8,10,20,.92); border:1px solid var(--cg-stroke);
+  color:var(--cg-ink); opacity:0; pointer-events:none;
+  transition:opacity .22s ease,transform .22s ease;
+}
+.toast.on{ opacity:1; transform:translate(-50%,0); }
+
+/* ==========================================================================
+   4. 结局画面
+   ========================================================================== */
+#ending-screen{
+  align-items:center; justify-content:center;
+  gap:16px; text-align:center; overflow-y:auto;
+}
+.ending-card{
+  width:min(640px,90vw);
+  display:flex; flex-direction:column; align-items:center; gap:14px;
+  padding:clamp(24px,4.4vh,44px) clamp(20px,4vw,40px);
+  border-radius:22px; border:1px solid var(--cg-stroke);
+  background:linear-gradient(180deg,rgba(10,13,26,.86),rgba(6,8,18,.94));
+  box-shadow:0 26px 70px rgba(0,0,0,.55);
+  animation:endingIn .7s cubic-bezier(.2,.7,.2,1) both;
+}
+@keyframes endingIn{ from{ opacity:0; transform:translateY(26px) scale(.97); } to{ opacity:1; transform:none; } }
+.ending-kind{
+  font-size:12px; letter-spacing:.3em; text-transform:uppercase;
+  padding:4px 14px; border-radius:999px;
+  border:1px solid var(--cg-kind-color,var(--cg-primary));
+  color:var(--cg-kind-color,var(--cg-primary));
+  background:color-mix(in srgb,var(--cg-kind-color,var(--cg-primary)) 16%,transparent);
+}
+#ending-screen[data-kind="true"]{ --cg-kind-color:#ffd166; }
+#ending-screen[data-kind="good"]{ --cg-kind-color:#7ee2a8; }
+#ending-screen[data-kind="normal"]{ --cg-kind-color:#8fb1ff; }
+#ending-screen[data-kind="bad"]{ --cg-kind-color:#ff7b8a; }
+.ending-title{
+  margin:0; font-size:clamp(24px,4.6vw,40px); line-height:1.2; font-weight:800;
+  color:var(--cg-kind-color,var(--cg-ink));
+  text-shadow:0 8px 30px color-mix(in srgb,var(--cg-kind-color,var(--cg-primary)) 30%,transparent);
+}
+.ending-text{ margin:0; max-width:44ch; font-size:clamp(14px,1.7vw,17px); line-height:1.85; color:var(--cg-ink-dim); }
+.ending-vars{ font-size:12px; color:var(--cg-ink-dim); opacity:.85; white-space:pre-wrap; }
+.ending-actions{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-top:6px; }
+
+/* ==========================================================================
+   5. 模态面板（设置 / 图鉴 / 存档 / 历史）
+   ========================================================================== */
+.modal{
+  position:absolute; inset:0; z-index:60;
+  display:flex; align-items:center; justify-content:center;
+  padding:calc(var(--cg-pad-t) + 12px) 14px calc(var(--cg-pad-b) + 12px);
+  background:rgba(3,4,10,.62);
+  backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px);
+  animation:fadeIn .18s ease both;
+}
+@keyframes fadeIn{ from{ opacity:0; } to{ opacity:1; } }
+.panel{
+  width:min(620px,94vw); max-height:86vh;
+  display:flex; flex-direction:column;
+  border-radius:18px; border:1px solid var(--cg-stroke);
+  background:var(--cg-panel-strong);
+  box-shadow:0 26px 70px rgba(0,0,0,.6);
+  animation:panelIn .24s cubic-bezier(.2,.7,.2,1) both;
+}
+@keyframes panelIn{ from{ opacity:0; transform:translateY(18px) scale(.98); } to{ opacity:1; transform:none; } }
+.panel-head{
+  display:flex; align-items:center; justify-content:space-between; gap:10px;
+  padding:14px 18px; border-bottom:1px solid var(--cg-stroke);
+}
+.panel-title{ margin:0; font-size:17px; letter-spacing:.08em; }
+.panel-body{ padding:16px 18px; overflow-y:auto; }
+.panel-foot{
+  padding:12px 18px; border-top:1px solid var(--cg-stroke);
+  display:flex; gap:10px; justify-content:flex-end; flex-wrap:wrap;
+}
+.field{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:10px 0; border-bottom:1px dashed rgba(255,255,255,.10);
+}
+.field:last-child{ border-bottom:0; }
+.field-label{ font-size:14px; color:var(--cg-ink); display:flex; flex-direction:column; gap:3px; }
+.field-note{ font-size:11.5px; color:var(--cg-ink-dim); }
+.seg{ display:flex; gap:4px; padding:3px; border-radius:11px; background:rgba(255,255,255,.06); border:1px solid var(--cg-stroke); flex-wrap:wrap; justify-content:flex-end; }
+.seg-btn{
+  padding:6px 12px; border-radius:8px; border:0; background:transparent;
+  color:var(--cg-ink-dim); font-size:13px; transition:all .16s ease;
+}
+.seg-btn.on{ background:linear-gradient(120deg,var(--cg-primary),var(--cg-accent)); color:#14162a; font-weight:700; }
+.switch{
+  width:52px; height:28px; border-radius:999px; border:1px solid var(--cg-stroke);
+  background:rgba(255,255,255,.10); position:relative; transition:background .2s ease; flex:0 0 auto;
+}
+.switch::after{
+  content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%;
+  background:#fff; transition:transform .2s ease;
+}
+.switch.on{ background:linear-gradient(120deg,var(--cg-primary),var(--cg-accent)); }
+.switch.on::after{ transform:translateX(24px); }
+.slot-list{ display:flex; flex-direction:column; gap:10px; }
+.slot{
+  display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+  padding:12px 14px; border-radius:14px;
+  border:1px solid var(--cg-stroke); background:rgba(255,255,255,.045);
+}
+.slot-info{ flex:1 1 190px; min-width:150px; }
+.slot-name{ font-size:14px; margin-bottom:3px; }
+.slot-meta{ font-size:11.5px; color:var(--cg-ink-dim); line-height:1.5; }
+.slot.empty .slot-name{ color:var(--cg-ink-dim); }
+.slot-actions{ display:flex; gap:6px; flex-wrap:wrap; }
+.gallery-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:12px; }
+.gallery-item{
+  padding:14px; border-radius:14px; border:1px solid var(--cg-stroke);
+  background:rgba(255,255,255,.05); min-height:104px;
+  display:flex; flex-direction:column; gap:8px;
+}
+.gallery-item.locked{ opacity:.55; border-style:dashed; }
+.gallery-item[data-kind="true"]{ --cg-kind-color:#ffd166; }
+.gallery-item[data-kind="good"]{ --cg-kind-color:#7ee2a8; }
+.gallery-item[data-kind="normal"]{ --cg-kind-color:#8fb1ff; }
+.gallery-item[data-kind="bad"]{ --cg-kind-color:#ff7b8a; }
+.gallery-kind{ font-size:11px; letter-spacing:.18em; color:var(--cg-kind-color,var(--cg-ink-dim)); }
+.gallery-title{ font-size:15px; font-weight:700; }
+.gallery-text{ font-size:12.5px; color:var(--cg-ink-dim); line-height:1.65; }
+.gallery-date{ margin-top:auto; font-size:11px; color:var(--cg-ink-dim); opacity:.8; }
+.history-list{ display:flex; flex-direction:column; gap:12px; }
+.history-entry{ padding:10px 12px; border-radius:12px; background:rgba(255,255,255,.045); border:1px solid rgba(255,255,255,.07); }
+.history-who{ font-size:12.5px; font-weight:700; margin-bottom:5px; letter-spacing:.05em; }
+.history-who.narr{ color:var(--cg-ink-dim); font-style:italic; }
+.history-text{ font-size:14px; line-height:1.75; color:var(--cg-ink); white-space:pre-wrap; word-break:break-word; }
+.empty-tip{ text-align:center; color:var(--cg-ink-dim); font-size:13.5px; padding:24px 10px; line-height:1.8; }
+.var-table{ width:100%; border-collapse:collapse; font-size:12.5px; }
+.var-table th,.var-table td{ text-align:left; padding:6px 8px; border-bottom:1px solid rgba(255,255,255,.08); }
+.var-table th{ color:var(--cg-ink-dim); font-weight:500; }
+
+/* ==========================================================================
+   6. 响应式：竖屏 / 横屏 / 窄屏 / 平板 / 桌面
+   统一通过 CSS 变量覆盖尺寸，避免各组件重复写媒体查询
+   ========================================================================== */
+
+/* --- 横屏（手机横屏、平板横屏、桌面矮窗口）：对话框变矮、立绘变矮 --- */
+@media (orientation:landscape) and (max-height:620px){
+  :root{
+    --cg-sprite-h:48vh;
+    --cg-sprite-bottom:8vh;
+    --cg-sprite-w:min(26vw,250px);
+    --cg-dialog-pad:12px 20px;
+    --cg-dialog-font:17px;
+  }
+  .dialogue-box{ min-height:min(34vh,180px); max-height:52vh; }
+  .dialogue-text{ min-height:2.6em; max-height:26vh; font-size:calc(var(--cg-dialog-font) * 1.06); }
+  .dialogue-box[data-narration="1"]{ min-height:min(26vh,140px); }
+  .sprite-emoji{ font-size:clamp(44px,15vh,110px); }
+  .title-card{ max-height:calc(var(--cg-app-h) - 24px); padding:14px 20px; }
+  .title-buttons{ flex-direction:row; flex-wrap:wrap; justify-content:center; width:auto; max-width:min(560px,90vw); }
+  .title-buttons .btn{ flex:1 1 130px; min-height:42px; }
+  #title-screen{ gap:8px; }
+  .ending-card{ padding:18px 22px; }
+}
+
+/* --- 手机竖屏（≤430px）：立绘居中偏上，对话框占满宽度 --- */
+@media (orientation:portrait) and (max-width:430px){
+  :root{
+    --cg-sprite-h:42vh;
+    --cg-sprite-bottom:26vh;   /* 抬高立绘：脸在选项之上，身体与对话框自然衔接 */
+    --cg-dialog-pad:14px 16px;
+    --cg-dialog-font:17px;
+  }
+  .sprite-slot{ --cg-sprite-w:min(60vw,270px); }
+  .sprite-slot[data-pos="left"]{ left:calc(4vw + var(--cg-pad-l)); }
+  .sprite-slot[data-pos="right"]{ right:calc(4vw + var(--cg-pad-r)); }
+  .sprite-slot[data-pos="center"]{ margin-left:calc(min(60vw,270px) / -2); }
+  .sprite-emoji{ font-size:clamp(56px,10vh,104px); }
+  .dialogue-box{ left:calc(var(--cg-pad-l) + 8px); right:calc(var(--cg-pad-r) + 8px); min-height:min(34vh,220px); }
+  .dialogue-text{ max-height:38vh; }
+  .quick-btn{ width:34px; height:34px; font-size:15px; }
+  #choice-list{ width:min(94vw,520px); gap:10px; }
+  .choice-btn{ padding:12px 14px; }
+  .panel{ width:96vw; max-height:90vh; }
+  .gallery-grid{ grid-template-columns:repeat(auto-fill,minmax(136px,1fr)); }
+  .title-card{ width:94vw; padding:16px 16px; }
+  .title-buttons{ width:min(300px,88vw); }
+}
+
+/* --- 平板（768×1024 等）：立绘略大，对话框居中限宽 --- */
+@media (min-width:600px) and (max-width:900px){
+  :root{ --cg-sprite-h:54vh; --cg-sprite-bottom:18vh; }
+  .sprite-slot{ --cg-sprite-w:min(34vw,300px); }
+  .dialogue-box{ left:calc(var(--cg-pad-l) + 4vw); right:calc(var(--cg-pad-r) + 4vw); }
+}
+
+/* --- 窄高竖屏（如 375×667）：字号与留白更紧凑 --- */
+@media (orientation:portrait) and (max-height:700px){
+  .dialogue-box{ min-height:min(32vh,200px); }
+  .dialogue-text{ max-height:30vh; }
+  #title-screen{ justify-content:flex-start; padding-top:calc(var(--cg-pad-t) + 18px); }
+}
+
+/* --- 超宽桌面：内容居中不拉散 --- */
+@media (min-width:1400px){
+  :root{ --cg-sprite-h:56vh; --cg-sprite-bottom:14vh; }
+  .sprite-slot{ --cg-sprite-w:min(26vw,360px); }
+  .dialogue-box{ left:calc(var(--cg-pad-l) + max(2vw,(100vw - 1280px) / 2)); right:calc(var(--cg-pad-r) + max(2vw,(100vw - 1280px) / 2)); }
+}
+
+/* --- 低高度横屏（折叠屏 / 桌面矮窗）：进一步压缩 --- */
+@media (orientation:landscape) and (max-height:430px){
+  :root{ --cg-sprite-h:62vh; --cg-sprite-bottom:0vh; --cg-dialog-font:15px; }
+  .dialogue-box{ min-height:0; padding:10px 16px; bottom:calc(var(--cg-pad-b) + 6px); }
+  .dialogue-text{ min-height:2.2em; max-height:22vh; }
+  .chapter-chip{ display:none; }
+}
+
+/* --- 触屏设备：按钮加大，去掉 hover 抖动 --- */
+@media (hover:none){
+  .choice-btn:hover{ transform:none; }
+  .quick-btn{ width:42px; height:42px; }
+}
+
+/* --- 动效偏好：尊重系统「减少动态效果」 --- */
+@media (prefers-reduced-motion:reduce){
+  *{ animation-duration:.01ms !important; animation-iteration-count:1 !important; transition-duration:.06s !important; }
+  .title-aurora{ animation:none; }
+}
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ============================ 主菜单 / 标题画面 ============================ -->
+  <section id="title-screen" class="screen" data-testid="title-screen">
+    <div class="title-aurora" aria-hidden="true"></div>
+    <div class="title-card">
+      <h1 class="title-main" id="title-main">Galgame</h1>
+      <p class="title-sub" id="title-sub"></p>
+      <p class="title-synopsis" id="title-synopsis"></p>
+      <div class="title-tags" id="title-tags"></div>
+      <div class="title-buttons">
+        <button class="btn btn-main" id="btn-start" data-testid="btn-start">开始游戏</button>
+        <button class="btn" id="btn-continue" data-testid="btn-continue" disabled>继续游戏</button>
+        <button class="btn" id="btn-gallery" data-testid="btn-gallery">结局图鉴</button>
+        <button class="btn" id="btn-settings" data-testid="btn-settings">设置</button>
+      </div>
+    </div>
+    <div class="title-warn hidden" id="title-warn"></div>
+    <div class="title-foot" id="title-foot"></div>
+  </section>
+
+  <!-- ============================== 游戏画面 ============================== -->
+  <section id="game-screen" class="screen hidden" data-testid="game-screen">
+    <div class="bg-layer" id="bg-layer" aria-hidden="true">
+      <div class="bg" id="bg-a"></div>
+      <div class="bg" id="bg-b"></div>
+      <div class="bg-vignette"></div>
+    </div>
+    <div class="sprite-slot" id="slot-left" data-pos="left" aria-hidden="true"></div>
+    <div class="sprite-slot" id="slot-center" data-pos="center" aria-hidden="true"></div>
+    <div class="sprite-slot" id="slot-right" data-pos="right" aria-hidden="true"></div>
+
+    <div class="chapter-chip hidden" id="chapter-chip"></div>
+    <div class="quick-bar">
+      <button class="quick-btn" id="qb-log" title="历史回顾 (L)">☰</button>
+      <button class="quick-btn" id="qb-auto" title="自动播放 (A)">▶</button>
+      <button class="quick-btn" id="qb-save" title="快速存档 (Ctrl+S)">💾</button>
+      <button class="quick-btn" id="qb-menu" title="菜单 (Esc)">⚙</button>
+    </div>
+
+    <div class="dialogue-box" id="dialogue-box" data-narration="0">
+      <div class="speaker-name hidden" id="speaker-name" data-testid="speaker-name"></div>
+      <div class="dialogue-text" id="dialogue-text" data-testid="dialogue-text"></div>
+      <div class="advance-mark" id="advance-mark">▼</div>
+    </div>
+
+    <div id="choice-list" class="hidden" data-testid="choice-list"></div>
+    <div class="toast" id="toast"></div>
+  </section>
+
+  <!-- ============================== 结局画面 ============================== -->
+  <section id="ending-screen" class="screen hidden" data-testid="ending-screen" data-kind="normal">
+    <div class="ending-card">
+      <div class="ending-kind" id="ending-kind"></div>
+      <h2 class="ending-title" id="ending-title"></h2>
+      <p class="ending-text" id="ending-text"></p>
+      <div class="ending-vars hidden" id="ending-vars"></div>
+      <div class="ending-actions">
+        <button class="btn btn-main" id="btn-ending-title">回到标题</button>
+        <button class="btn btn-ghost" id="btn-ending-gallery">结局图鉴</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================== 模态面板容器 =========================== -->
+  <div id="modal-root"></div>
+</div>
+
+<script type="application/json" id="galgame-data">{"meta":{"title":"星屑回忆","subtitle":"致那颗会回来的流星","author":"Galgame Generator","version":"1.0.0","createdAt":"2026-10-02T13:20:50.150Z","language":"简体中文","synopsis":"父母工作调动，我转学到海边小镇，加入了濒临废部的天文社。沉默的社长雪希与元气过头的海斗，带我卷入一场关于“会回来的流星”的观测。随着旧记录被翻开，一个持续十年的谎言与悲伤真相渐渐浮现。","tags":["校园恋爱","青春感伤","天文社","海边小镇","催泪","选择向"],"theme":{"primary":"#1b2a4a","accent":"#f7a072","bg":"#2b1a3a"}},"characters":[{"id":"yuki","name":"雪希","color":"#a8c3d8","role":"天文社社长","profile":"银发，外冷内热，说话简短但很在意别人","sprites":{"default":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAPAAAAFACAYAAACC6PFTAAAAAXNSR0IArs4c6QAAAARnQU1BAACxjwv8YQUAAAAJcEhZcwAADsMAAA7DAcdvqGQAABG/SURBVHhe7d0/qCV1msZxww0NN9xwwgknNJIJDBYjo2UDg8GoIzGYYDDRyE0GBBMF0UEcEAVREEdEoVGQHoRmBcGhQWgQmhEaXBoGzj5P2xev/by3+5xTVef+3qpvsZ8H5ln73rrnVJ369ztVj+x2+j8ALSmzBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMkv0dOdf/7a7dvOxh7p959Hy36MfZZYYk1e+j797avfqtT/t/vi3d3ZXPvxk99hru8meef/q7tmPPrj7cz/49r/v/h5/GFTzgLEos8Tl80rkFcor6RNv/rNc8Zb2+Ov/d/f3v/LVC7svvv89K/WAlFni9L699dvd29ev3N0SesWpVqgReIX2B8v1H35X/h04LWWWOA1v1V78/NVL28JO5Q8a78p7t56t8+VQZonl3PjxN7s/f/k/uyffulmuFF35Q+ilqy+zZT4xZZaY162f/v3u7vF/vfO/5cK/Nk/99R93d7Nv3v6P8vXAfJRZYh5egL2LXC3kW+FdbB/fV68PplNmiWm8wG59xb2fV2R2r+enzBLH8YrrBbVagPEzn8X2JbLq9cPhlFniMD4xxYp7GK/IbJGnU2aJ/fjSiU/WjHzddnQ+c83QzuMps8TD+Rquz7ZWCyUO40tQHsJZvc54MGWWuJgvCbG7vAyPyeaM9WGUWaL27jd/YHf5BDz2unr9kZRZ4td8jPb8p38pFzYsw1tj7+1U7wd+ocwSv/Au3VZGUI3Gx8Y+11C9L/iZMkv8jF3mMbBLfTFlllvHLvN42KWuKbPcMo9ffvq9a+VChMvly3acpf41ZZZb5RFVXNsdm4+LGcH1C2WWW+SFousX67fG5yU+u/Gf5fu4Ncost8ZnOjlZ1Q+jt1iB7y4E1cKBHjwWvXpft0KZ5Vaw8q7DlldiZZZb4N3mamFAT75lUfU+r50yy7XzCSuOeddni8fEyizXzJeKONu8Tv5Q3trQS2WWa+VBGlznXTevxFsa7KHMco08PJIRVtvgPSzvaVXLwdoos1wjvoS/Lf4G2RaeFqHMcm18hrJ6k7FuvrVvtTysiTLLNeGM87b5uU3VcrEWyizXwse9nLTaNh8Pr/kRL8os14LjXpi/S7zW42FllmvAcS/O8xMhq+WkO2WW3XmXieNe3G+N3yNWZtkdu86oeBzA2nallVl25i96V28eYG98/Vy53HSlzLIrf7qu7cn3mJcPrdZ0czxlll359qPVmwac50OsavnpSJllRx7Azokr7Gst99RSZtkRJ65wCB9qreGEljLLbrz1rd4k4EHWcBcPZZbdsPXFMbwVrpanTpRZdsLWF1N0PxZWZtkJW19M4cEd1XLVhTLLLtj6Yg6dt8LKLLtg64s5dN4KK7PswF9YqN4M4BjXbj5WLmejU2bZge/GX70RXT3z/m535cNfq/67kXSc54t0vf2OMssOfNOy6o3o4sm3druXru52X3yvP+cB0/Uf/IR6Pxu3/jmn1HGe9+U7d3Qc2KHMcnT+Xmf1JnTwxJu73Wt/32lh0Z9y4PTuNz+vRNXPXVLHeT5Gx/tnKbMc3UtXXy7fgNF5F/P2Hf0JEyavRM9/Wv/8JXSc52M9+9EHmtt6mRuVMsuRdf3K4IufH7cFu2jyFrH6PXPqOM9TdPyqoTLLkXX8wr5XhCWmt6/Xv28OHed5Dt3GRyuzHFm3a7/eBZ1zK3b/5JNK1e+douM8z8V3sKyWu1EpsxyVd587fefXJ2+mHj8+bPKK9vR79e8/Rsd5nlun+0grsxyVL7ZXL/iovLt4iumzG/XvP0bHeZ5bp+cMK7McVafBG96SLbkbev80xxat4zwvodOgDmWWo7ry4SflCz4iD2Q45eTrrdV8HKLjPC/Bj+Oplr8RKbMcUbfjX49GOuV066d6Pg7RcZ6X0uU4WJnliDpdPvLIpcuYpuySdpznJXW5nKTMckR+tk31Qo/Ig/wvY5oy2qnjPC/Jlyur5XA0yixH5O9sVi/0iP74N83yJUx//rKen310nOcl+csN1XI4GmWWI+p0/OuBCpcxTRmq2HGel9ZhWKUyy9H4haxe4FF5t/AyJp9FruZnHx3neWkdnmaozHI0X3z/+/IFHpWHIl7G5PHL1fzso+M8L+3db/6gOayXyVEosxyNX8jqBR6VB0RcxuQTUdX87KPjPC/Nz9qqlseRKLMcTacz0Gdu3tasn3DyCKrHX6/nZV8d53lJHc5EK7Mcjb9oXb3AIzvVmOKzaY6xxR3neUm+bVO1PI5EmeVoOt7/ygMUTjn5MlA1H4foOM9L8pWPankciTLL0VQvbgfewpxi+vZW/fuP0XGelzT6kEplliO5fefR8oXt4FRbtDm3ZB3neUl++ke1XI5CmeVIut/Afelv+CzxjZ6O87yU0W/4rsxyJGt4AsPH3+lPWWDyt4eWOovbcZ6XwAo8Ube7cFS8wM69QnhF8DeIqt83h47zvITR786hzHIka1iBz3jc7xyTd0FPtRXrOM9zYgWeyHfLr17Yrjxk8ZofDH/EdOPHyzn503Ge5/LG18/pr6iXzREosxyJPwGrF7Y7L9TeRd3nHlR+FtEIY4Y7zvNUvg9btVyOQpnlSLqNgz6Gt3A+8+vd1fPcj7rb2XGej8EKPNFat8DogRV4IlZgXCZW4InWdBYa/XAWeiJWYFwmVuCJbvz4m/KFBU7Bd4OplstRKLMcyRqGUqIvhlJO1O2GdliX0W9sp8xyNNULC5wC3weewZNv3SxfXGBpfiZXtUyOQpnlaDo9lRDr0eEphcosR/PS1ZfLFxhYkm+mWC2PI1FmORo/Ka56gYEl+XbG1fI4EmWWo+n0aFGsR4dHjCqzHA2DOXAZRh/EYcosR1S9wMCSRr+EZMosR9Tx5u7oq8NN3U2Z5Yhe/PzV8oUGluBLl9VyOBplliPie8E4pdG/B3xGmeWI+FIDTmn0LzGcUWY5qqffu1a+2MCcnnjzn+XyNyJllqPq+Jxg9NPhucBnlFmOigEdOIUOAzjOKLMcVecnFaKP0Z9IeJ4yy5E98/7V8kUH5uCvrlbL3aiUWY5sCzd6x+V55asXyuVuVMosR+Zb7HiUTPXiA1N12n02ZZaj81nC6sUHpvBlymp5G5kyy9FxNhpL6HT2+Ywyy9H5PkW+2F69CcCxfHhWLW8jU2bZAbfZwZw63D6nosyyA9+vt3ojgGP4QfLVcjY6ZZZdMDYac/C139FvH3sRZZZdcDILc+h48uqMMstO2Apjis5bX1Nm2QlbYUzReetryiy7YSuMY3hEX+etrymz7IatMI7R4cbtD6PMsiO2wjiEt74dB27cT5llR2yFcYg3vn6uXI66UWbZFV9ywD58j/Hux75nlFl25TtX8lVDPEyXO07uQ5llZ941qt40wPyAgGq56UqZZWfeNeIxLKj4G2xrOHF1njLL7vxUueoNxLb5dkzV8tKZMss14FlKOM83Q6yWk+6UWa4Bu9I4413nDo8KPYYyy7Xwg8E5Kw2PEaiWjzVQZrkmPNVw29YwXPJBlFmuDcfD2+Tj3rUM2LiIMsu14Xh4e9Z83HueMss18vHwqe9k+dJVL0j1/29LXvv76V+HNR/3nqfMcq08hO4UJ7Uef903SdOv1HTtZv3fbMUbX//8Oty87THI9X8zN5/3qN7/NVJmuWZLf2vJC+mNH/Wrzk1eiKv/du2e//TeC3Bvun3Hz96t/9u5vHrtT/pN9Xu/Rsos126pB6R54fRCWk1LL7ijefq93e7Ov+798fdNr3xV/5upfK/w6v1eM2WWW+BP6mohONbZruJFk1dsL9TVv12bJ9/6eZf5QZMPMXyoUf37Yzz/6V/0U+v3es2UWW7FXJeXrnyoH7fH5C3Ssx/VP2Mtnvqrn/B37w9+yPTnL+ufcSg/VWHtl4suosxyS+ZaiR+2BT4/vfh5/TO68wfZRYcQ909ffF//jENteeU1ZZZb49E61cJxKJ9x3nd6+/q8u5CXzVvTfSef5JvjspJ3m7e88poyyy2a40YAXigfdux3fvKC/Mz79c/q4vwls30mb6G9m139rENs8YRVRZnlVs0xbtor5EVnXy+aPvi254APD1S59dO9P2LPaY5zAFu7VPQgyiy3zDcDmDrYwyvxvseCZ5NXBK8Q1c8bjS+JHbKncTbNcdJqS4M09qHMcus8YsvPzKkWoH15QMcxC7lXZF8nHXGL7JNU13+4N6MHTN4j8aCO6mfuy8NgtzI88hDKLPGItqCP3j3DWS1M+/L10H0vqdw/eaF/95t5jhen8O/3lvPYv8MfYlOvf/tbRVv4YsIxlFniFz65NWWX2ltSXzKZMvlkl89an+oa8tSV9mzyWfmpexK+QrD1M80PoswSv3b9h99pof5HuYDtw2dqvVt86MmtiyZ/IHgFm7plO+NdY/88b/GnrrRnkz9wqt+1L3aZ96PMEsm71L7uWC1s+/Jx8dSt8UWTt3bmFcdf3/NgkbMV0//7fp/dyC9dzDH55N3U4112mfenzBIX81Zh6gkur1yHnqUeffLehUejTdll9lZ3Lc8sOhVllngwb41f+eqFciHclxd077KuYfLf4RN21d+5L+/drO2m66egzBL78bGxd/eqBXJfXvC95eq4RfZu+NSz5L7Vka+9V68vHk6ZJQ7z9vUrd3f/qgV0Xz7R5YEcx1w7PuXkDxpvcaeeQPOZfY+o4gzzNMoscTjvVnuBnOO+Wx7p5OGVhw5TXGrySuv5meOmBF5xfWmI3eV5KLPE8bxF8RZ56omuMz5z7TPJS529vmjySSl/ScFnlOf41pQ/2PwB5w+66nXDcZRZYjqvyB63O+X6ccWDOXypyJeM5roM5N12f0D48pK3snNdXzZ/kPkDjRV3GcosMa+Pv3tKK8Y75QI+B58I8zVfr3xeCX1S7Oy68Plrv+f5eNv/ZqnvJF/58JO7H2Ac4y5LmSWW4eM+31Dv6feulQt9dz6j7Ou4DMI4HWWWWJ5vNO9ryXPvYp+aj2395XpfUqv+TixLmSVO69tbv717nOjd7FPceH4q7x57S8tKe/mUWeJyecXwGVuvKNUKdGoerOK9BQZcjEeZJcbiLbRvMuCV2rurXrHnuN58nrf8/rm+S6d/j1dWtrDjU2aJPrxin/FK55XvYfyFjPP/jjPFfSmzBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNCDMksAPSizBNDBI7v/B5ubM+xymZv7AAAAAElFTkSuQmCC"},"placeholder":{"emoji":"🌙","gradient":"linear-gradient(180deg,#a8c3d8 0%,#5d6d7e 100%)"}},{"id":"kaito","name":"海斗","color":"#f4a261","role":"青梅竹马","profile":"短发元气少女，负责社团伙食，爱开玩笑","sprites":{},"placeholder":{"emoji":"🍙","gradient":"linear-gradient(180deg,#f4a261 0%,#e76f51 100%)"}}],"backgrounds":[{"id":"rooftop_dusk","name":"天台·黄昏","css":"linear-gradient(180deg,#2b1a3a 0%,#b4654a 50%,#f7a072 100%)","image":null},{"id":"clubroom","name":"天文社活动室","css":"linear-gradient(180deg,#3a2e2a 0%,#6b4f3a 100%)","image":null},{"id":"classroom_day","name":"教室·白昼","css":"linear-gradient(180deg,#cfd9df 0%,#e8ecef 100%)","image":null},{"id":"seaside_evening","name":"海边·傍晚","css":"linear-gradient(180deg,#4a3b52 0%,#7d5260 50%,#e67e22 100%)","image":null},{"id":"observatory_night","name":"星空观测地·夜","css":"linear-gradient(180deg,#0b1e3a 0%,#1b2a4a 55%,#2c3e50 100%)","image":null},{"id":"storeroom","name":"旧器材仓库","css":"linear-gradient(180deg,#2b2b2b 0%,#57534e 100%)","image":null}],"scenes":[{"id":"c1s1","chapter":1,"name":"天台相遇","background":"rooftop_dusk","lines":[{"type":"narration","text":"铁门“吱呀”推开，天台的风卷着夕阳余温扑在脸上。"},{"type":"narration","text":"墙角处，一个女生正举着望远镜，像一尊被光钉住的剪影。"},{"type":"dialogue","speaker":"yuki","text":"……你挡到我的光了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我下意识侧身让开，她仍维持着仰望的姿势，纹丝不动。"},{"type":"dialogue","speaker":"kaito","text":"喂——！你就是那个转学生吧！我是一年三班的海斗！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"天台禁止闲人入内哦，除非……加入我们天文社！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"海斗，别闹了。新同学会被你吓到的。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她转过身，将望远镜拆下装进背包，仿佛刚才的一切只是我的错觉。"},{"type":"dialogue","speaker":"kaito","text":"社长别走啊！我们今天要拉新人入社的！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"跟我们去社团活动室啦！有好东西给你看！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"choice","prompt":"","options":[{"text":"跟海斗去天文社","goto":"c1s2","effects":{"affection.kaito":1}},{"text":"犹豫地看向雪希","goto":"c1s2","effects":{"affection.yuki":1}}]}]},{"id":"c1s2","chapter":1,"name":"社团活动室","background":"clubroom","lines":[{"type":"narration","text":"活动室的门牌歪斜，上面用粉笔写着“天文社”三个字。"},{"type":"dialogue","speaker":"kaito","text":"欢迎来到我们的秘密基地！虽然有点乱，但超有历史感！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"桌上堆满星图，墙角立着一台蒙着灰的折射望远镜。"},{"type":"dialogue","speaker":"kaito","text":"这望远镜可是老古董，修一修还能用！对吧，雪希？","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"……嗯。它还能看到极远的星光。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希用指尖轻轻拂去镜筒上的灰，动作轻得像在触碰易碎的梦。"},{"type":"dialogue","speaker":"kaito","text":"还有这个！旧器材仓库的钥匙，只有社长才有！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"今天我们本来要去整理仓库的，正好拉上你当苦力～","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"仓库很久没人去了，里面很危险。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"钥匙在雪希掌心反射出微弱的金属光泽，她的手指微微收紧。"},{"type":"choice","prompt":"","options":[{"text":"主动提出去仓库","goto":"c1s3","effects":{"affection.kaito":1}},{"text":"问雪希仓库里有什么","goto":"c1s3","effects":{"affection.yuki":1}}]}]},{"id":"c1s3","chapter":1,"name":"旧器材仓库","background":"storeroom","lines":[{"type":"narration","text":"锁孔转动声在寂静的走廊里格外清晰，灰尘从门缝涌出。"},{"type":"narration","text":"旧器材仓库里，蒙尘的赤道仪、断裂的三脚架堆成小山。"},{"type":"dialogue","speaker":"kaito","text":"呜哇！这里简直就是天文社的时光胶囊！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"小心点，别碰到镜子。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我蹲下身整理纸箱，一张发黄的观测记录从缝隙滑落。"},{"type":"narration","text":"上面用褪色的钢笔写着——“会回来的流星，观测成功”。"},{"type":"dialogue","speaker":"kaito","text":"什么什么？我看看！……会回来的流星？这说法好浪漫！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"这是很久以前的事了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希突然抢过记录，把纸折好塞进自己口袋，动作迅速却有些慌乱。"},{"type":"dialogue","speaker":"kaito","text":"社长，你藏什么啊？让我也看看嘛！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希别过脸，窗外夕阳把她的侧脸染成一片模糊的橘色。"},{"type":"choice","prompt":"","options":[{"text":"追问雪希记录的内容","goto":"c1s4","effects":{"affection.yuki":1}},{"text":"跟海斗一起起哄","goto":"c1s4","effects":{"affection.kaito":1}}]}]},{"id":"c1s4","chapter":1,"name":"重建观测计划","background":"clubroom","lines":[{"type":"narration","text":"回到活动室，海斗已经摊开一本崭新的观测笔记。"},{"type":"dialogue","speaker":"kaito","text":"我们重建观测计划吧！就像这张记录上写的一样，找到那颗会回来的流星！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"……不要做没意义的事。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"怎么就没意义啦？说不定真能再看到呢！而且我们社团都快废部了，总得搞点大新闻。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希沉默了一会儿，指尖无意识地在窗玻璃上划着。"},{"type":"dialogue","speaker":"yuki","text":"随便你们。但观测需要精密计算，不是闹着玩的。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"所以需要社长你来指导啊！而且我们还有新人帮忙！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"主角感觉雪希并非真的反对，更像在害怕什么。"},{"type":"dialogue","speaker":"yuki","text":"别期待太高。有些星星，错过了就不会回来。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她说这话时，目光一直落在窗外极远处的海平线上。"},{"type":"choice","prompt":"","options":[{"text":"去海边散散心","goto":"c1s5","effects":{"affection.kaito":1}},{"text":"想单独和雪希谈谈","goto":"c1s5","effects":{"affection.yuki":1}}]}]},{"id":"c1s5","chapter":1,"name":"海边的回忆","background":"seaside_evening","lines":[{"type":"narration","text":"傍晚的海风带着咸味，浪花一遍遍抹平沙滩上的脚印。"},{"type":"dialogue","speaker":"kaito","text":"其实啊，五年前雪希的姐姐也在这间天文社。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"海斗踢着一枚贝壳，语气突然变得很轻。"},{"type":"dialogue","speaker":"kaito","text":"听说她姐姐超厉害，就是为了观测那颗‘会回来的流星’才入社的。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"但那天晚上观测之后，她就再也没回来。像是被流星带走了一样。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"主角停下脚步，海斗也停下来，望着灰蓝色的海面。"},{"type":"dialogue","speaker":"kaito","text":"雪希从那以后就不太爱说话了。她肯定还想着姐姐的事。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"远处的灯塔开始闪烁，把暗下去的天际刺出一个缺口。"},{"type":"dialogue","speaker":"kaito","text":"我们要是能重建那次观测，也许就能解开雪希的心结吧。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"所以啊，你一定要帮我们！拜托了！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"choice","prompt":"","options":[{"text":"用力点头","goto":"c2s1","effects":{"flags.rebuild_plan":true}},{"text":"说自己还需要考虑","goto":"c2s1","effects":{"affection.yuki":1}}]}]},{"id":"c2s1","chapter":2,"name":"教室中的对话","background":"classroom_day","lines":[{"type":"narration","text":"放学后的教室，夕阳把课桌影子拉得很长。雪希坐在窗边，指尖无意识地摩挲记录本的边缘。"},{"type":"dialogue","speaker":"yuki","text":"观测时间……还是定在今晚十点。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我把笔记推到她面前，圈出的日期和地点像某种试探。"},{"type":"dialogue","speaker":"yuki","text":"姐姐的事，和观测没有关系。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她合上记录本，声音淡得像从很远的地方传来。"},{"type":"dialogue","speaker":"yuki","text":"关于姐姐的事，请你不要多问。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"海斗突然从后门探进头来，手里晃着两罐汽水。"},{"type":"dialogue","speaker":"kaito","text":"喂——还没结束？今晚可别迟到啊，云层预报有点不妙。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"海斗，现在还在教室，你太吵了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她起身离开，经过我身边时脚步顿了顿。"},{"type":"dialogue","speaker":"yuki","text":"如果你也认为我是因为姐姐才观测，那就错了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她的背影消失在走廊尽头，夕阳开始下沉。"},{"type":"choice","prompt":"","options":[{"text":"追上去，继续追问姐姐的事","goto":"c2s2","effects":{"affection.yuki":1}},{"text":"留下来和海斗商量对策","goto":"c2s2","effects":{"affection.kaito":1}}]}]},{"id":"c2s2","chapter":2,"name":"首次观测失败","background":"observatory_night","lines":[{"type":"narration","text":"夜风带着海腥味，观测地的草坪被探照灯染得发蓝。"},{"type":"dialogue","speaker":"kaito","text":"哈哈，果然全是云。雪希，你选的这天运气真差啊。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"气象数据是你说今天最适合，现在反倒怪我？","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希仰着头，睫毛在镜片后投下小片阴影。她没再说话。"},{"type":"narration","text":"我铺开防潮垫，海斗一屁股坐下，拆开零食包装。"},{"type":"dialogue","speaker":"kaito","text":"别站着了，失败就失败，反正流星不会跑，下次再来呗。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"它会回来的……那个流星，一定会回来。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她声音很轻，却像在说服自己。海斗看了她一眼，把薯片递过去。"},{"type":"dialogue","speaker":"kaito","text":"行行行，你说了算。不过先吃点东西，饿着肚子可等不到奇迹。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希犹豫片刻，接过一片，咔地咬下。我忽然觉得距离近了一点。"},{"type":"narration","text":"云层边缘透出微弱光晕，像被遮住的星子在做最后的挣扎。"},{"type":"choice","prompt":"","options":[{"text":"轻声安慰雪希，告诉她下次一定能看到","goto":"c2s3","effects":{"affection.yuki":2,"flags.comfort_yuki":true}},{"text":"调侃海斗，说他带这么多零食像小学生","goto":"c2s3","effects":{"affection.kaito":2,"flags.cheer_kaito":true}}]}]},{"id":"c2s3","chapter":2,"name":"记录的疑点","background":"clubroom","lines":[{"type":"narration","text":"活动室的荧光灯吱啦作响，记录本摊在桌上，页码边缘微微卷起。"},{"type":"narration","text":"我逐行核对日期和天气，指腹抚过墨水痕迹，竟有细微晕染。"},{"type":"dialogue","speaker":"yuki","text":"你在看什么？那是旧记录。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希不知何时站在门口，怀里抱着星图，神色警惕。"},{"type":"narration","text":"我摇头说随便看看，她走近，伸手想抽走记录本。"},{"type":"dialogue","speaker":"yuki","text":"这些只是参考资料，没什么特别的。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我按住其中一页，墨色在灯光下有种不自然的亮，像是最近才写上去的。"},{"type":"dialogue","speaker":"kaito","text":"喂，你们在抢什么好东西？我也要看！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"海斗挤过来，雪希立刻松开手，别过脸去。"},{"type":"dialogue","speaker":"yuki","text":"我先去准备下次观测的器材。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她匆匆离开，门合上的瞬间，我注意到页面角落有被橡皮反复擦拭的毛糙。"},{"type":"choice","prompt":"","options":[{"text":"趁雪希离开，继续检查更多记录","goto":"c2s4","effects":{"flags.search_records":true}},{"text":"追上雪希，直接问她为什么撒谎","goto":"c2s4","effects":{"flags.confront_yuki_direct":true}}]}]},{"id":"c2s4","chapter":2,"name":"仓库里的真相","background":"storeroom","lines":[{"type":"narration","text":"器材仓库里堆满蒙尘的天文望远镜和纸箱，空气中有股陈旧的油墨味。"},{"type":"narration","text":"我打开最里面的铁柜，一叠练习纸滑落，上面写满与记录本相同的字样。"},{"type":"narration","text":"笔迹或深或浅，有些只写了半句，有些还带着涂改液的白色硬块。"},{"type":"narration","text":"我捧起那叠纸，墨香尚未散尽，分明是近期反复练习的产物。"},{"type":"dialogue","speaker":"yuki","text":"你在这里做什么？这里禁止进入。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"雪希出现在门口，脸色煞白，箱子从她手中砰地掉下。"},{"type":"narration","text":"她看到我手里的纸，瞳孔骤然收缩，像被人扼住喉咙。"},{"type":"dialogue","speaker":"yuki","text":"不是的……那不是你想的那样。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她后退半步，背脊撞上货架，望远镜零件叮当响成一片。"},{"type":"narration","text":"我终于确定——所谓的旧观测记录，全是她伪造的谎言。"},{"type":"choice","prompt":"","options":[{"text":"拿着证据去天台，和她当面对质","goto":"c2s5","effects":{"flags.confront_on_rooftop":true}},{"text":"先听她解释，给她一个机会","goto":"c2s5","effects":{"affection.yuki":3,"flags.listen_first":true}}]}]},{"id":"c2s5","chapter":2,"name":"天台对峙","background":"rooftop_dusk","lines":[{"type":"narration","text":"黄昏的天台铺满琥珀色光，铁栏杆的影子斜切过地面，像一道伤口。"},{"type":"narration","text":"雪希背对着我，发丝被风吹乱，肩胛骨轻微起伏。"},{"type":"dialogue","speaker":"yuki","text":"你果然……都知道了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她转过身，笑容破碎，眼里有水光在夕照下闪动。"},{"type":"dialogue","speaker":"yuki","text":"姐姐在十年前就死了。那场流星雨，她没能等到。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我攥紧那叠练习纸，喉咙发紧，有什么东西在胸口坍塌。"},{"type":"dialogue","speaker":"yuki","text":"我一直在等那颗会回来的流星……就像等一个不会回来的人。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"雪希，你冷静一点！别说了！","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"天台的铁门突然被撞开，海斗喘着气站在那里，满脸震惊。"},{"type":"dialogue","speaker":"kaito","text":"你们……雪希，他说的是真的吗？你不是说姐姐在远方治疗吗？","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"yuki","text":"海斗，对不起。我骗了你，也骗了自己。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"dialogue","speaker":"kaito","text":"雪希，姐姐她……已经回不来了啊。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她终于蹲下身，把脸埋进膝盖，哭声被晚风撕成碎片。"},{"type":"choice","prompt":"","options":[{"text":"陪在她身边，直到她平静下来","goto":"c3s1","effects":{"affection.yuki":5,"flags.comforted_yuki":true}},{"text":"和海斗一起扶她起来，告诉她还有未来","goto":"c3s1","effects":{"affection.kaito":3,"flags.comforted_kaito":true}}]}]},{"id":"c3s1","chapter":3,"name":"海斗的调解","background":"clubroom","lines":[{"type":"narration","text":"黄昏的活动室，雪希坐在窗边，手里反复折着一张旧星图。"},{"type":"dialogue","speaker":"kaito","text":"喂，你和雪希到底怎么了？这几天她一句话都不说，你也不来部室。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"海斗抱着胳膊堵在门口，眉头少见地拧成疙瘩。"},{"type":"dialogue","speaker":"kaito","text":"我知道你看了旧记录。那里面有对雪希来说很重要的东西吧？","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我张了张嘴，却发不出声音。真相像一枚冰冷的石子卡在喉咙。"},{"type":"dialogue","speaker":"kaito","text":"你打算怎么办？是追着她问清楚，还是装作什么都没发生？","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"窗外的云压得很低，雪希的侧脸在阴影里模糊不清。"},{"type":"choice","prompt":"","options":[{"text":"我想知道真相","goto":"c3s2","effects":{"affection.yuki":1,"flags.pursue_truth":true}},{"text":"我不想让她受伤","goto":"c3s2","effects":{"affection.kaito":1,"flags.protect_fantasy":true}}]}]},{"id":"c3s2","chapter":3,"name":"海边约定","background":"seaside_evening","lines":[{"type":"narration","text":"退潮后的沙滩像一面暗色的镜子，倒映着雪希低垂的睫毛。"},{"type":"dialogue","speaker":"yuki","text":"为什么要带我来这里？今晚没有流星，什么也不会出现。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"海风把她的围巾吹起，像折断的翅膀。我握紧口袋里那张泛黄的观测记录。"},{"type":"dialogue","speaker":"yuki","text":"你最近总是躲着我。是因为那个吗？那个被我藏起来的、关于哥哥的约定。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她突然笑了，却比哭更让人心碎。海面尽头，落日正一点一点沉没。"},{"type":"narration","text":"我必须做出选择。是告诉她“哥哥不会回来”，还是继续陪她等下去。"},{"type":"choice","prompt":"","options":[{"text":"雪希，听我说真相","goto":"c3s5","effects":{"affection.yuki":2,"flags.tell_truth":true}},{"text":"我会一直陪你看流星","goto":"c3s4","effects":{"affection.yuki":2,"flags.keep_fantasy":true}},{"text":"我……我不知道该怎么办","goto":"c3s3","effects":{"affection.yuki":-1,"flags.hesitate":true}}]}]},{"id":"c3s3","chapter":3,"name":"最后的观测","background":"observatory_night","lines":[{"type":"narration","text":"天文台的圆顶打开，星光像碎冰一样倾泻下来，却没有一颗是那颗“会回来的流星”。"},{"type":"dialogue","speaker":"yuki","text":"你还不肯说吗？还是说，你连对我撒谎的力气都没有了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我僵硬地握着记录板，笔尖在纸上划出无意义的线。海斗在远处沉默地调整望远镜。"},{"type":"dialogue","speaker":"yuki","text":"你和我一样，都在害怕。害怕一旦说出口，这十年的等待就真的结束了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她闭上眼睛，睫毛上凝着细小的水光。观测灯突然灭了一盏，仪器发出短促的警报。"},{"type":"dialogue","speaker":"yuki","text":"够了。到此为止吧。这个社团，这场观测，都已经没有意义了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我想伸手抓住她，却只碰到她飘起的发梢。星图从手中滑落，被夜风吹向黑色的海。"},{"type":"ending","endingId":"bad_end"}]},{"id":"c3s4","chapter":3,"name":"天台的答案","background":"rooftop_dusk","lines":[{"type":"narration","text":"天台的铁门在我身后合上，雪希站在栏杆边，校服裙摆被黄昏的风轻轻掀起。"},{"type":"dialogue","speaker":"yuki","text":"你来了。我还在想，你也许不会来。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"我走到她身边，把外套披在她肩上。天空的橙色正在褪去，星子隐约浮现。"},{"type":"dialogue","speaker":"yuki","text":"如果那颗流星永远不来，你也会一直这样看着我吗？","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她的声音轻得像要碎掉。我知道她需要我肯定的谎言，哪怕那只是玻璃做的星尘。"},{"type":"narration","text":"我点了点头，握住她冰凉的手指。她笑了，眼角却滑下一滴泪，折射着最后的天光。"},{"type":"dialogue","speaker":"yuki","text":"那么，我们就继续等下去吧。即使等不到，也没关系。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"那一刻，整个世界像被装进一颗透明的星星里，美丽而虚幻，随时可能坠落。"},{"type":"ending","endingId":"good_end"}]},{"id":"c3s5","chapter":3,"name":"星屑回忆","background":"classroom_day","lines":[{"type":"narration","text":"毕业前的最后一个午后，教室空无一人，只有雪希和我，还有窗外飘来的樱花。"},{"type":"dialogue","speaker":"yuki","text":"我把那本旧记录带来了。哥哥的笔迹还在，可是人已经不在了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她翻开泛黄的纸页，指尖停在十年前的那天。我从未见她如此平静。"},{"type":"dialogue","speaker":"yuki","text":"谢谢你，没有让我继续困在那个谎言里。虽然很痛，但我终于可以哭了。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"她的眼泪大颗大颗地落下，砸在记录上，晕开了蓝色的墨迹。我没有说话，只是把手放在她颤抖的肩上。"},{"type":"dialogue","speaker":"yuki","text":"哥哥一定希望我向前看。那颗流星，其实从来没有回来过。","pose":"center","sprite":"default","enter":false,"exit":false},{"type":"narration","text":"教室的窗帘被风吹起，阳光洒在相握的手上。窗外的樱花像星屑一样，纷纷扬扬。"},{"type":"narration","text":"我知道，从今天起，她会沿着没有他的地平线，一步步走下去。"},{"type":"ending","endingId":"true_end"}]}],"endings":[{"id":"true_end","title":"回到现实的地平线","text":"在c3s1选择追问真相，c3s3继续坦诚，c3s4选择拥抱现实。雪希接受姐姐死亡，与主角共同重建天文社，两人在毕业那天告白，携手面向没有姐姐的未来。","kind":"true"},{"id":"good_end","title":"玻璃星尘","text":"在c3s1选择守护幻想，c3s3不戳破，c3s4选择陪伴她继续幻想。主角放弃真相，与雪希在虚构的姐姐存在中互相依偎，青春蒙上淡淡哀伤，但两人幸福。","kind":"good"},{"id":"bad_end","title":"观测终止","text":"在c3s1选择追问真相，c3s3过度逼问，c3s4转身离开或未能接住她的崩溃。雪希无法承受现实，独自离开小镇，天文社再次废部，主角追悔莫及。","kind":"bad"}],"start":"c1s1"}</script>
+<script>
+/* ============================================================================
+ * Galgame 独立播放器引擎（单文件 / 零依赖 / 原生 ES2020+）
+ * 数据来源：上方 id="galgame-data" 的 JSON 脚本块（由打包器整体替换占位符）
+ * 模块顺序：Util → Data → Persist → State → Render → Input → Boot
+ * ========================================================================== */
+(function () {
+  'use strict';
+
+  /* ==========================================================================
+   * 模块 0 · Util —— 通用小工具
+   * ========================================================================== */
+  const $ = (sel) => document.querySelector(sel);
+
+  /** HTML 转义，所有用户数据都经此进入 innerHTML */
+  function esc(v) {
+    return String(v ?? '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  /** 取字符串字段，非法则回退 */
+  function str(v, fb = '') { return typeof v === 'string' ? v : (v == null ? fb : String(v)); }
+  /** 取负整数（数组下标 / 索引） */
+  function int(v, fb = 0) { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : fb; }
+  /** 取正数（时间间隔等） */
+  function num(v, fb = 0) { const n = Number(v); return Number.isFinite(n) ? n : fb; }
+  /** 取对象，非对象则回退空对象 */
+  function obj(v) { return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {}; }
+  /** 取数组，非数组则回退空数组 */
+  function arr(v) { return Array.isArray(v) ? v : []; }
+  /** 深拷贝（数据来自 JSON，结构安全） */
+  function clone(v) { try { return JSON.parse(JSON.stringify(v)); } catch (e) { return null; } }
+
+  /** 统一时间戳格式：2026-10-02 20:13 */
+  function fmtTime(ts) {
+    const n = num(ts, 0);
+    if (!n) return '—';
+    const d = new Date(n);
+    if (isNaN(d.getTime())) return '—';
+    const p = (x) => String(x).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  /** localStorage 安全包装：无痕模式 / file:// 受限时降级为内存存储 */
+  const memStore = Object.create(null);
+  const LS = {
+    available: (function () {
+      try { const k = '__galgame_probe__'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; }
+      catch (e) { return false; }
+    })(),
+    get(k) { try { return this.available ? localStorage.getItem(k) : (k in memStore ? memStore[k] : null); } catch (e) { return null; } },
+    set(k, v) { try { if (this.available) localStorage.setItem(k, v); else memStore[k] = v; } catch (e) { memStore[k] = v; } },
+    del(k) { try { if (this.available) localStorage.removeItem(k); else delete memStore[k]; } catch (e) { delete memStore[k]; } },
+    /** 读 JSON，解析失败返回 fallback */
+    getJSON(k, fb) {
+      const raw = this.get(k);
+      if (!raw) return fb;
+      try { const v = JSON.parse(raw); return v == null ? fb : v; } catch (e) { return fb; }
+    },
+    setJSON(k, v) { this.set(k, JSON.stringify(v)); }
+  };
+
+  /* localStorage 键名（按作品标题隔离，避免多部作品互相覆盖） */
+  const KEY = {
+    settings: 'galgame.settings.v1',
+    autosave: 'galgame.save.auto.v1',
+    slot: (i) => `galgame.save.slot${i}.v1`,
+    gallery: 'galgame.gallery.v1',
+    read: 'galgame.read.v1'
+  };
+
+  /* ==========================================================================
+   * 模块 1 · Data —— 读取并规范化数据契约（Story Schema v1）
+   * 规范化原则：任何缺失 / 类型错误都降级为安全值，绝不抛错白屏
+   * ========================================================================== */
+  function readRawData() {
+    const el = document.getElementById('galgame-data');
+    if (!el) return { ok: false, err: '缺少数据容器（galgame-data）' };
+    const text = (el.textContent || '').trim();
+    if (!text) return { ok: false, err: '数据为空：打包器尚未注入剧本 JSON' };
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== 'object') return { ok: false, err: '剧本 JSON 顶层不是对象' };
+      return { ok: true, data: parsed };
+    } catch (e) {
+      return { ok: false, err: '剧本 JSON 解析失败：' + (e && e.message ? e.message : e) };
+    }
+  }
+
+  const CELL_COUNT = 12; // placeholder.gradient 被切分的色标格子数
+
+  /** 把 gradient 字符串切成若干色，供占位立绘上色 */
+  function parseGradientColors(gradient, fb) {
+    const s = str(gradient, '');
+    const hexes = s.match(/#[0-9a-fA-F]{3,8}\b/g) || [];
+    const rgbas = s.match(/rgba?\([^)]*\)/g) || [];
+    const list = hexes.concat(rgbas).map((c) => c.trim());
+    if (!list.length) return { colors: [], raw: '' };
+    const out = [];
+    for (let i = 0; i < CELL_COUNT; i++) out.push(list[Math.min(list.length - 1, Math.floor(i * list.length / CELL_COUNT))]);
+    return { colors: out, raw: list[list.length - 1], first: list[0] };
+  }
+
+  function normalizeData(raw) {
+    const meta = obj(raw.meta);
+    const theme = obj(meta.theme);
+    const data = {
+      meta: {
+        title: str(meta.title, '未命名作品'),
+        subtitle: str(meta.subtitle, ''),
+        author: str(meta.author, ''),
+        version: str(meta.version, ''),
+        createdAt: str(meta.createdAt, ''),
+        language: str(meta.language, 'zh-CN'),
+        synopsis: str(meta.synopsis, ''),
+        tags: arr(meta.tags).map((t) => str(t, '')).filter(Boolean),
+        theme: {
+          primary: str(theme.primary, '') || '#ff8fb1',
+          accent: str(theme.accent, '') || '#8fb1ff',
+          bg: str(theme.bg, '') || '#101425'
+        }
+      },
+      characters: [],
+      backgrounds: [],
+      scenes: [],
+      endings: [],
+      start: str(raw.start, ''),
+      warnings: []
+    };
+
+    // ---- 角色 ----
+    arr(raw.characters).forEach((c, i) => {
+      if (!c || typeof c !== 'object') { data.warnings.push(`characters[${i}] 不是对象，已跳过`); return; }
+      const id = str(c.id, '');
+      if (!id) { data.warnings.push(`characters[${i}] 缺少 id，已跳过`); return; }
+      const ph = obj(c.placeholder);
+      const grad = parseGradientColors(ph.gradient, null);
+      data.characters.push({
+        id,
+        name: str(c.name, id),
+        color: str(c.color, '') || data.meta.theme.primary,
+        role: str(c.role, ''),
+        profile: str(c.profile, ''),
+        sprites: obj(c.sprites),
+        placeholder: {
+          emoji: str(ph.emoji, '👤'),
+          gradient: str(ph.gradient, ''),
+          colors: grad.colors,
+          fallback: grad.colors.length ? '' : `linear-gradient(160deg,${data.meta.theme.primary},${data.meta.theme.accent})`
+        }
+      });
+    });
+
+    // ---- 背景 ----
+    arr(raw.backgrounds).forEach((b, i) => {
+      if (!b || typeof b !== 'object') { data.warnings.push(`backgrounds[${i}] 不是对象，已跳过`); return; }
+      const id = str(b.id, '');
+      if (!id) { data.warnings.push(`backgrounds[${i}] 缺少 id，已跳过`); return; }
+      const image = typeof b.image === 'string' && b.image ? b.image : null;
+      data.backgrounds.push({
+        id,
+        name: str(b.name, id),
+        css: str(b.css, '') || `linear-gradient(180deg,${data.meta.theme.bg},#1c2140)`,
+        image
+      });
+    });
+
+    // ---- 场景 ----
+    arr(raw.scenes).forEach((s, i) => {
+      if (!s || typeof s !== 'object') { data.warnings.push(`scenes[${i}] 不是对象，已跳过`); return; }
+      const id = str(s.id, '');
+      if (!id) { data.warnings.push(`scenes[${i}] 缺少 id，已跳过`); return; }
+      data.scenes.push({
+        id,
+        chapter: int(s.chapter, 0),
+        name: str(s.name, id),
+        background: str(s.background, ''),
+        lines: arr(s.lines).filter((l) => l && typeof l === 'object')
+      });
+    });
+
+    // ---- 结局 ----
+    const KINDS = ['true', 'good', 'normal', 'bad'];
+    arr(raw.endings).forEach((e, i) => {
+      if (!e || typeof e !== 'object') { data.warnings.push(`endings[${i}] 不是对象，已跳过`); return; }
+      const id = str(e.id, '');
+      if (!id) { data.warnings.push(`endings[${i}] 缺少 id，已跳过`); return; }
+      const kind = str(e.kind, 'normal');
+      data.endings.push({
+        id,
+        title: str(e.title, '结局'),
+        text: str(e.text, ''),
+        kind: KINDS.indexOf(kind) >= 0 ? kind : 'normal'
+      });
+    });
+
+    // ---- 索引表（快速查找） ----
+    data.charMap = Object.create(null);
+    data.characters.forEach((c) => { if (!(c.id in data.charMap)) data.charMap[c.id] = c; });
+    data.bgMap = Object.create(null);
+    data.backgrounds.forEach((b) => { if (!(b.id in data.bgMap)) data.bgMap[b.id] = b; });
+    data.sceneMap = Object.create(null);
+    data.scenes.forEach((s) => { if (!(s.id in data.sceneMap)) data.sceneMap[s.id] = s; });
+    data.endingMap = Object.create(null);
+    data.endings.forEach((e) => { if (!(e.id in data.endingMap)) data.endingMap[e.id] = e; });
+
+    // ---- 契约自检（只提示，不阻断） ----
+    if (!data.start || !data.sceneMap[data.start]) {
+      data.warnings.push(`start 场景「${data.start || '空'}」不存在`);
+      data.start = data.scenes.length ? data.scenes[0].id : '';
+    }
+    if (!data.characters.length) data.warnings.push('characters 为空：台词将只显示文本');
+    if (!data.scenes.length) data.warnings.push('scenes 为空：无法开始游戏');
+    data.scenes.forEach((s) => {
+      if (s.background && !data.bgMap[s.background]) {
+        data.warnings.push(`场景 ${s.id} 的背景「${s.background}」不存在，已回退默认背景`);
+      }
+      s.lines.forEach((l, li) => {
+        if (str(l.type, '') === 'choice') {
+          arr(l.options).forEach((o, oi) => {
+            const g = str(obj(o).goto, '');
+            if (!g || !data.sceneMap[g]) data.warnings.push(`场景 ${s.id} 第 ${li + 1} 行选项 ${oi + 1} 的 goto「${g || '空'}」不存在`);
+          });
+        }
+        if (str(l.type, '') === 'ending') {
+          const eid = str(l.endingId, '');
+          if (!eid || !data.endingMap[eid]) data.warnings.push(`场景 ${s.id} 第 ${li + 1} 行的 endingId「${eid || '空'}」不存在`);
+        }
+        if (str(l.type, '') === 'dialogue') {
+          const sp = str(l.speaker, '');
+          if (sp && !data.charMap[sp]) data.warnings.push(`场景 ${s.id} 第 ${li + 1} 行的 speaker「${sp}」不存在`);
+        }
+      });
+    });
+    return data;
+  }
+
+  /* ==========================================================================
+   * 模块 2 · Persist —— 设置 / 存档 / 图鉴 / 已读 的读写
+   * ========================================================================== */
+  const DEFAULT_SETTINGS = {
+    textSpeed: 'medium',      // slow | medium | fast | instant
+    fontSize: 'medium',       // small | medium | large
+    autoPlay: false,
+    autoInterval: 2200,       // ms
+    skipRead: false           // 跳过已读（已读文本瞬间显示）
+  };
+  const SPEED_MS = { slow: 68, medium: 34, fast: 16, instant: 0 };
+
+  const Persist = {
+    readSettings() {
+      const s = obj(LS.getJSON(KEY.settings, {}));
+      const out = Object.assign({}, DEFAULT_SETTINGS);
+      if (['slow', 'medium', 'fast', 'instant'].indexOf(s.textSpeed) >= 0) out.textSpeed = s.textSpeed;
+      if (['small', 'medium', 'large'].indexOf(s.fontSize) >= 0) out.fontSize = s.fontSize;
+      if (typeof s.autoPlay === 'boolean') out.autoPlay = s.autoPlay;
+      if (typeof s.skipRead === 'boolean') out.skipRead = s.skipRead;
+      const iv = num(s.autoInterval, DEFAULT_SETTINGS.autoInterval);
+      out.autoInterval = Math.min(8000, Math.max(600, iv));
+      return out;
+    },
+    writeSettings() { LS.setJSON(KEY.settings, State.settings); },
+
+    readGallery() {
+      const g = LS.getJSON(KEY.gallery, {});
+      const out = {};
+      if (g && typeof g === 'object' && !Array.isArray(g)) {
+        Object.keys(g).forEach((k) => {
+          const v = g[k];
+          out[k] = { at: num(obj(v).at, 0), title: str(obj(v).title, '') };
+        });
+      }
+      return out;
+    },
+    writeGallery() { LS.setJSON(KEY.gallery, State.gallery); },
+
+    readSlot(i) {
+      const o = LS.getJSON(KEY.slot(i), null);
+      return o && typeof o === 'object' ? o : null;
+    },
+    readAuto() {
+      const o = LS.getJSON(KEY.autosave, null);
+      return o && typeof o === 'object' ? o : null;
+    },
+
+    readRead() {
+      const r = LS.getJSON(KEY.read, []);
+      const out = [];
+      if (Array.isArray(r)) r.forEach((x) => { if (typeof x === 'string') out.push(x); });
+      return out;
+    },
+    writeRead() {
+      const list = Array.from(State.readSet);
+      // 上限 4000 条，超出丢最早的，避免 localStorage 膨胀
+      LS.setJSON(KEY.read, list.slice(-4000));
+    }
+  };
+
+  /* 已读标记：用低成本哈希标识一行文本 */
+  function lineHash(sceneId, idx, text) {
+    const s = sceneId + '|' + idx + '|' + text;
+    let h = 2166136261;
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+    return (h >>> 0).toString(36);
+  }
+
+  /* ==========================================================================
+   * 模块 3 · State —— 全局状态与 DOM 缓存
+   * ========================================================================== */
+  const SPEEDS = ['slow', 'medium', 'fast', 'instant'];
+  const POSITIONS = ['left', 'center', 'right'];
+
+  const el = {
+    app: $('#app'),
+    titleScreen: $('#title-screen'),
+    titleMain: $('#title-main'),
+    titleSub: $('#title-sub'),
+    titleSynopsis: $('#title-synopsis'),
+    titleTags: $('#title-tags'),
+    titleFoot: $('#title-foot'),
+    titleWarn: $('#title-warn'),
+    btnStart: $('#btn-start'),
+    btnContinue: $('#btn-continue'),
+    btnGallery: $('#btn-gallery'),
+    btnSettings: $('#btn-settings'),
+
+    gameScreen: $('#game-screen'),
+    bgA: $('#bg-a'),
+    bgB: $('#bg-b'),
+    slot: { left: $('#slot-left'), center: $('#slot-center'), right: $('#slot-right') },
+    chapterChip: $('#chapter-chip'),
+    quickBar: $('.quick-bar'),
+    qbLog: $('#qb-log'),
+    qbAuto: $('#qb-auto'),
+    qbSave: $('#qb-save'),
+    qbMenu: $('#qb-menu'),
+    dbox: $('#dialogue-box'),
+    speaker: $('#speaker-name'),
+    dtext: $('#dialogue-text'),
+    mark: $('#advance-mark'),
+    choiceList: $('#choice-list'),
+    toast: $('#toast'),
+
+    endingScreen: $('#ending-screen'),
+    endingKind: $('#ending-kind'),
+    endingTitle: $('#ending-title'),
+    endingText: $('#ending-text'),
+    endingVars: $('#ending-vars'),
+    btnEndingTitle: $('#btn-ending-title'),
+    btnEndingGallery: $('#btn-ending-gallery'),
+
+    modalRoot: $('#modal-root')
+  };
+
+  const State = {
+    data: null,
+    dataErr: '',
+    hasSave: false,
+
+    settings: Persist.readSettings(),
+    gallery: Persist.readGallery(),
+    readSet: new Set(Persist.readRead()),
+
+    phase: 'title',            // title | line | choice | ending
+    playMode: 'title',         // title | game | ending（控制显示哪一层屏幕）
+    modal: null,               // 当前打开的面板名
+    modalReturnFocus: null,
+    uiLocked: false,           // 模态打开时禁止推进
+    fatal: '',                 // 致命错误文案（写入标题屏提示）
+
+    sceneId: '',
+    sceneIdx: -1,
+    lineIdx: -1,
+    currentLine: null,
+    vars: {},
+    sprites: {},               // pos -> { charId, key, pose }
+    history: [],               // [{ name, color, text, narr }]
+    pendingChoice: null,
+    choiceOptions: [],
+    endingVarsSnapshot: null,
+    endedId: '',
+    visitedOrder: [],          // 本次游玩经过的场景 id
+    steps: 0
+  };
+  const Runtime = {
+    bgVisible: 'a',
+    type: { raf: 0, full: '', shown: 0, done: true, timer: 0 },
+    autoTimer: 0,
+    autoTextTimer: 0,
+    toastTimer: 0
+  };
+
+  const hasSaveData = () => !!(Persist.readAuto() || [1, 2, 3].some((i) => Persist.readSlot(i)));
+
+  /* ==========================================================================
+   * 模块 4 · Render —— 主题 / 背景 / 立绘 / 对话 / 结局 / 面板
+   * ========================================================================== */
+  function applyTheme() {
+    const t = State.data ? State.data.meta.theme : { primary: '#ff8fb1', accent: '#8fb1ff', bg: '#101425' };
+    const r = document.documentElement.style;
+    r.setProperty('--cg-primary', t.primary);
+    r.setProperty('--cg-accent', t.accent);
+    r.setProperty('--cg-bg', t.bg);
+    r.setProperty('--cg-primary-soft', hexToRgba(t.primary, 0.2));
+    r.setProperty('--cg-accent-soft', hexToRgba(t.accent, 0.2));
+  }
+  /** #rgb / #rrggbb → rgba()；非 hex 原样返回（允许直接写颜色关键字） */
+  function hexToRgba(color, alpha) {
+    const s = str(color, '');
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s.trim());
+    if (!m) return s || 'rgba(255,143,177,' + alpha + ')';
+    let hex = m[1];
+    if (hex.length === 3) hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+    const n = parseInt(hex, 16);
+    return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${alpha})`;
+  }
+  function applyFontSize() { document.documentElement.setAttribute('data-fontsize', State.settings.fontSize); }
+
+  /* ---------------------------- 屏幕切换 ---------------------------- */
+  function showScreen(name) {
+    State.playMode = name;
+    el.titleScreen.classList.toggle('hidden', name !== 'title');
+    el.gameScreen.classList.toggle('hidden', name !== 'game');
+    el.endingScreen.classList.toggle('hidden', name !== 'ending');
+    document.documentElement.setAttribute('data-screen', name);
+  }
+
+  function toast(msg, ms) {
+    if (!el.toast) return;
+    el.toast.textContent = str(msg, '');
+    el.toast.classList.add('on');
+    clearTimeout(Runtime.toastTimer);
+    Runtime.toastTimer = setTimeout(() => el.toast.classList.remove('on'), num(ms, 1800));
+  }
+
+  /* ---------------------------- 背景渲染 ---------------------------- */
+  function resolveBackground(bgId) {
+    const d = State.data;
+    if (!d) return null;
+    if (bgId && d.bgMap[bgId]) return d.bgMap[bgId];
+    if (d.backgrounds.length) return d.backgrounds[0];
+    return null;
+  }
+  /** 应用场景背景（交叉淡入）；返回背景对象 */
+  function applyBackground(bgId) {
+    const bg = resolveBackground(bgId);
+    const css = bg && bg.image
+      ? { image: bg.image, css: bg.css }
+      : { image: null, css: bg ? bg.css : State.data.meta.theme.bg };
+    const cur = Runtime.bgVisible === 'a' ? el.bgA : el.bgB;
+    const next = Runtime.bgVisible === 'a' ? el.bgB : el.bgA;
+    const styleOf = (node) => {
+      if (css.image) { node.style.background = ''; node.style.backgroundImage = `url("${css.image}")`; }
+      else { node.style.backgroundImage = 'none'; node.style.background = css.css; }
+    };
+    // 首个背景：直接显示，不做黑场闪烁
+    if (!cur.classList.contains('active')) {
+      styleOf(cur); cur.classList.add('active');
+      return bg;
+    }
+    styleOf(next);
+    next.classList.add('active');
+    cur.classList.remove('active');
+    Runtime.bgVisible = Runtime.bgVisible === 'a' ? 'b' : 'a';
+    return bg;
+  }
+
+  /* ---------------------------- 立绘渲染 ---------------------------- */
+  const spriteCache = new Map(); // charId|key -> HTML 片段
+
+  function spriteMarkup(ch) {
+    const key = str(ch.key, 'default');
+    const cacheKey = ch.id + '|' + key;
+    if (spriteCache.has(cacheKey)) return spriteCache.get(cacheKey);
+    const src = str(obj(ch.sprites)[key], '') || str(obj(ch.sprites)['default'], '');
+    let html;
+    if (src) {
+      html = `<div class="sprite-inner"><img class="sprite-img" alt="${esc(ch.name)}" src="${esc(src)}"></div>`;
+    } else {
+      // 回退：emoji + 渐变占位（sprites 为空对象时的必备路径）
+      const ph = obj(ch.placeholder);
+      const colors = arr(ph.colors);
+      const bg = str(ph.gradient, '') || str(ph.fallback, '') || `linear-gradient(160deg,${State.data.meta.theme.primary},${State.data.meta.theme.accent})`;
+      const grains = colors.length
+        ? `<div class="sprite-grain" aria-hidden="true">${colors.map((c) => `<i style="background:${esc(c)}"></i>`).join('')}</div>`
+        : '';
+      html = `<div class="sprite-inner">${grains}`
+        + `<div class="sprite-placeholder" style="background:${esc(bg)}">`
+        + `<span class="sprite-emoji">${esc(str(ph.emoji, '👤'))}</span></div>`
+        + `<span class="sprite-name">${esc(ch.name)}</span></div>`;
+    }
+    spriteCache.set(cacheKey, html);
+    return html;
+  }
+
+  function spriteEntry(pos) { return State.sprites[pos] || null; }
+
+  /** 真正绘制到 slot：animate=true 播放入场动画 */
+  function drawSprite(pos, entry, animate) {
+    const slot = el.slot[pos];
+    if (!slot) return;
+    if (!entry) {
+      if (slot.childElementCount) {
+        slot.classList.remove('in');
+        const old = slot;
+        setTimeout(() => { if (!spriteEntry(pos)) { old.innerHTML = ''; old.classList.remove('leaving'); } }, 340);
+      }
+      return;
+    }
+    const ch = State.data.charMap[entry.charId];
+    if (!ch) return;
+    const sig = entry.charId + '|' + str(entry.key, 'default');
+    const changed = slot.getAttribute('data-sig') !== sig;
+    if (changed) {
+      slot.innerHTML = spriteMarkup({ id: ch.id, name: ch.name, sprites: ch.sprites, placeholder: ch.placeholder, key: entry.key });
+      slot.setAttribute('data-sig', sig);
+    }
+    slot.classList.remove('leaving');
+    if (animate) {
+      slot.classList.remove('in');
+      void slot.offsetWidth;  // 强制重排，让 transition 重新生效
+      slot.classList.add('in');
+    } else {
+      slot.classList.add('in');
+    }
+  }
+
+  function setSprite(pos, charId, key, pose, animate) {
+    if (POSITIONS.indexOf(pos) < 0) pos = 'center';
+    State.sprites[pos] = { charId, key: str(key, 'default'), pose: str(pose, 'center') };
+    drawSprite(pos, State.sprites[pos], animate !== false);
+  }
+
+  function removeSprite(pos, animate) {
+    if (POSITIONS.indexOf(pos) < 0) return;
+    State.sprites[pos] = null;
+    const slot = el.slot[pos];
+    if (!slot) return;
+    if (animate === false) { slot.innerHTML = ''; slot.classList.remove('in', 'leaving'); return; }
+    slot.classList.add('leaving');
+    slot.classList.remove('in');
+    setTimeout(() => {
+      if (!spriteEntry(pos)) { slot.innerHTML = ''; slot.classList.remove('leaving'); }
+    }, 400);
+  }
+
+  function clearSprites() {
+    POSITIONS.forEach((p) => { State.sprites[p] = null; const s = el.slot[p]; if (s) { s.innerHTML = ''; s.classList.remove('in', 'leaving'); } });
+  }
+
+  /** 立绘状态快照（存档用） */
+  function spriteSnapshot() {
+    const out = {};
+    POSITIONS.forEach((p) => { const s = spriteEntry(p); if (s) out[p] = { charId: s.charId, key: s.key, pose: s.pose }; });
+    return out;
+  }
+  /** 从存档恢复立绘（无动画） */
+  function restoreSprites(snap) {
+    clearSprites();
+    const s = obj(snap);
+    POSITIONS.forEach((p) => {
+      const v = obj(s[p]);
+      if (!v.charId || !State.data.charMap[v.charId]) return;
+      State.sprites[p] = { charId: str(v.charId, ''), key: str(v.key, 'default'), pose: str(v.pose, 'center') };
+      drawSprite(p, State.sprites[p], false);
+    });
+  }
+
+  /* ---------------------------- 对话渲染 ---------------------------- */
+  function clearAutoTimers() {
+    clearTimeout(Runtime.autoTimer); Runtime.autoTimer = 0;
+    clearTimeout(Runtime.autoTextTimer); Runtime.autoTextTimer = 0;
+  }
+  function stopTypewriter() {
+    if (Runtime.type.raf) cancelAnimationFrame(Runtime.type.raf);
+    Runtime.type.raf = 0;
+  }
+  function speedMs() {
+    const v = SPEED_MS[State.settings.textSpeed];
+    return typeof v === 'number' ? v : SPEED_MS.medium;
+  }
+
+  /** 打字机；instant=true 或速度档为 instant 时立即完成 */
+  function typeText(text, instant) {
+    const full = str(text, '');
+    stopTypewriter();
+    Runtime.type.full = full;
+    Runtime.type.shown = 0;
+    el.dtext.textContent = '';
+    const ms = instant ? 0 : speedMs();
+    if (!full) { finishType(); return; }
+    if (ms <= 0) { el.dtext.textContent = full; Runtime.type.shown = full.length; finishType(); return; }
+    Runtime.type.done = false;
+    el.mark.classList.remove('on');
+    // 先同步写出首字，保证任何时刻读取 dialogue-text 都能看到内容随时间增长
+    Runtime.type.shown = 1;
+    el.dtext.textContent = full.slice(0, 1);
+    let last = performance.now();
+    let acc = 0;
+    const step = (now) => {
+      const dt = now - last; last = now;
+      acc += dt;
+      const n = Math.floor(acc / ms);
+      if (n > 0) {
+        acc -= n * ms;
+        Runtime.type.shown = Math.min(full.length, Runtime.type.shown + n);
+        el.dtext.textContent = full.slice(0, Runtime.type.shown);
+        if (Runtime.type.shown >= full.length) { finishType(); return; }
+      }
+      Runtime.type.raf = requestAnimationFrame(step);
+    };
+    Runtime.type.raf = requestAnimationFrame(step);
+  }
+  function finishType() {
+    stopTypewriter();
+    Runtime.type.shown = Runtime.type.full.length;
+    Runtime.type.done = true;
+    el.dtext.textContent = Runtime.type.full;
+    el.mark.classList.add('on');
+    scheduleAuto();
+  }
+  /** 若正在打字则先补全，返回是否发生过“补全” */
+  function completeTypeIfNeeded() {
+    if (Runtime.type.done) return false;
+    finishType();
+    return true;
+  }
+
+  function setSpeaker(ch) {
+    if (!ch) { el.speaker.classList.add('hidden'); el.speaker.textContent = ''; return; }
+    el.speaker.classList.remove('hidden');
+    el.speaker.textContent = ch.name;
+    el.speaker.style.color = ch.color;
+    el.speaker.style.borderColor = hexToRgba(ch.color, 0.55);
+    el.speaker.style.background = hexToRgba(ch.color, 0.16);
+  }
+
+  /** 渲染一条 narration / dialogue */
+  function renderTextLine(line) {
+    const type = str(line.type, '');
+    if (type === 'narration') {
+      el.dbox.setAttribute('data-narration', '1');
+      setSpeaker(null);
+      return str(line.text, '');
+    }
+    if (type !== 'dialogue') {
+      // 未知类型：不进入对话流程（由 execLine 跳过）
+      el.dbox.setAttribute('data-narration', '0');
+      setSpeaker(null);
+      return str(line.text, '');
+    }
+    el.dbox.setAttribute('data-narration', '0');
+    const chId = str(line.speaker, '');
+    const ch = State.data.charMap[chId] || null;
+    setSpeaker(ch || { id: chId || 'unknown', name: chId || '???', color: State.data.meta.theme.accent });
+
+    const pos = POSITIONS.indexOf(str(line.pose, 'center')) >= 0 ? str(line.pose, 'center') : 'center';
+    const key = str(line.sprite, 'default') || 'default';
+    if (line.exit === true) {
+      removeSprite(pos, true);
+    } else if (ch) {
+      setSprite(pos, ch.id, key, pos, true);
+    }
+    return str(line.text, '');
+  }
+
+  /* ---------------------------- 选项渲染 ---------------------------- */
+  function renderChoice(line) {
+    // 过滤掉非法选项，并把“过滤后的列表”存起来，保证下标与点击结果一致
+    const options = arr(line.options).filter((o) => o && typeof o === 'object');
+    State.choiceOptions = options;
+    const prompt = str(line.prompt, '');
+    el.choiceList.innerHTML = '';
+    if (prompt) {
+      const p = document.createElement('div');
+      p.className = 'choice-prompt';
+      p.textContent = prompt;
+      el.choiceList.appendChild(p);
+    }
+    options.forEach((o, i) => {
+      const b = document.createElement('button');
+      b.className = 'choice-btn';
+      b.type = 'button';
+      b.setAttribute('data-choice-index', String(i));
+      const hint = str(o.hint, '');
+      b.innerHTML = `<span class="choice-idx">${i + 1}</span>${esc(str(o.text, '选项 ' + (i + 1)))}`
+        + (hint ? `<span class="choice-hint">${esc(hint)}</span>` : '');
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); pickChoice(i); });
+      el.choiceList.appendChild(b);
+    });
+    if (!options.length) {
+      const tip = document.createElement('button');
+      tip.className = 'choice-btn';
+      tip.type = 'button';
+      tip.textContent = '（本行没有可用选项，点击继续）';
+      tip.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        el.dbox.removeAttribute('data-choice');
+        hideChoice();
+        State.phase = 'line';
+        State.pendingChoice = null;
+        State.lineIdx++;
+        execLine();
+      });
+      el.choiceList.appendChild(tip);
+    }
+    el.choiceList.classList.remove('hidden');
+    requestAnimationFrame(positionChoiceList);
+  }
+
+  /**
+   * 让选项列表尽量落在“立绘之下的空档”里：
+   * 若居中位置会压到对话框，就整体上移到对话框上沿之上（同时避免顶出画面）
+   */
+  function positionChoiceList() {
+    if (el.choiceList.classList.contains('hidden')) return;
+    el.choiceList.style.setProperty('--choice-lift', '0px');
+    const app = el.app.getBoundingClientRect();
+    const listH = el.choiceList.offsetHeight;
+    const dboxTop = el.dbox.getBoundingClientRect().top - app.top;
+    const centerTop = (app.height - listH) / 2;
+    const margin = 14;
+    let lift = 0;
+    if (centerTop + listH > dboxTop - margin) lift = (centerTop + listH) - (dboxTop - margin);
+    const maxLift = centerTop - 44;              // 顶部至少留出 44px（章节点/工具条）
+    if (maxLift > 0) lift = Math.min(lift, maxLift);
+    el.choiceList.style.setProperty('--choice-lift', Math.max(0, Math.round(lift)) + 'px');
+  }
+  function hideChoice() {
+    el.choiceList.classList.add('hidden');
+    el.choiceList.innerHTML = '';
+    State.choiceOptions = [];
+    el.dbox.removeAttribute('data-choice');
+    el.gameScreen.removeAttribute('data-phase');
+  }
+
+  /* ---------------------------- 结局渲染 ---------------------------- */
+  function renderEnding(endingIdOrData) {
+    const d = State.data;
+    let e = null;
+    if (endingIdOrData && typeof endingIdOrData === 'object') e = endingIdOrData;
+    else e = d.endingMap[str(endingIdOrData, '')] || null;
+    if (!e) {
+      e = { id: str(endingIdOrData, 'unknown'), title: '未知结局', text: '数据中找不到该结局定义。', kind: 'normal' };
+    }
+    State.endedId = e.id;
+    State.endingVarsSnapshot = clone(State.vars) || {};
+    // 记录图鉴
+    State.gallery[e.id] = { at: Date.now(), title: e.title };
+    Persist.writeGallery();
+    // 展示
+    el.endingScreen.setAttribute('data-kind', e.kind);
+    el.endingKind.textContent = ({ true: 'True End', good: 'Good End', normal: 'Normal End', bad: 'Bad End' })[e.kind] || 'Ending';
+    el.endingTitle.textContent = e.title;
+    el.endingText.textContent = e.text;
+    const keys = Object.keys(State.endingVarsSnapshot);
+    if (keys.length) {
+      el.endingVars.classList.remove('hidden');
+      el.endingVars.textContent = '变量：' + keys.sort().map((k) => `${k}=${fmtVar(State.endingVarsSnapshot[k])}`).join(' · ');
+    } else {
+      el.endingVars.classList.add('hidden');
+      el.endingVars.textContent = '';
+    }
+    State.phase = 'ending';
+    clearAutoTimers();
+    stopTypewriter();
+    hideChoice();
+    showScreen('ending');
+    updateAutoButton();
+    // 结局后清空自动存档，避免“继续游戏”回到已结束的流程
+    LS.del(KEY.autosave);
+    refreshContinueButton();
+  }
+  function fmtVar(v) {
+    if (typeof v === 'number') return Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000);
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    return str(v, '');
+  }
+
+  /* ---------------------------- 模态面板 ---------------------------- */
+  function closeModal() {
+    State.modal = null;
+    State.uiLocked = false;
+    el.modalRoot.innerHTML = '';
+    updateAutoButton();
+  }
+  function openModal(name, titleText, bodyHTML, footButtons) {
+    State.modal = name;
+    State.uiLocked = true;
+    clearAutoTimers();
+    const wrap = document.createElement('div');
+    wrap.className = 'modal';
+    wrap.setAttribute('data-modal', name);
+    const foot = (footButtons || []).map((b, i) =>
+      `<button class="btn ${b.main ? 'btn-main' : 'btn-ghost'} btn-sm" data-foot-index="${i}">${esc(b.label)}</button>`).join('');
+    wrap.innerHTML = `<div class="panel" data-testid="panel-${esc(name)}" role="dialog" aria-label="${esc(titleText)}">
+        <div class="panel-head">
+          <h3 class="panel-title">${esc(titleText)}</h3>
+          <button class="btn btn-ghost btn-sm" data-modal-close="1">关闭</button>
+        </div>
+        <div class="panel-body">${bodyHTML}</div>
+        ${foot ? `<div class="panel-foot">${foot}</div>` : ''}
+      </div>`;
+    el.modalRoot.innerHTML = '';
+    el.modalRoot.appendChild(wrap);
+    wrap.addEventListener('click', (ev) => { if (ev.target === wrap) closeModal(); });
+    wrap.querySelector('[data-modal-close]').addEventListener('click', closeModal);
+    (footButtons || []).forEach((b, i) => {
+      const btn = wrap.querySelector(`[data-foot-index="${i}"]`);
+      if (btn && typeof b.onClick === 'function') btn.addEventListener('click', () => b.onClick());
+    });
+    if (typeof (footButtons || []).onMount === 'function') footButtons.onMount(wrap);
+    return wrap;
+  }
+
+  /* 通用分段选择器 HTML */
+  function segHTML(field, options, current) {
+    return `<div class="seg" data-seg="${esc(field)}">${options.map((o) =>
+      `<button class="seg-btn${o.value === current ? ' on' : ''}" data-seg-field="${esc(field)}" data-seg-value="${esc(o.value)}">${esc(o.label)}</button>`
+    ).join('')}</div>`;
+  }
+
+  /* ==========================================================================
+   * 模块 5 · Engine —— effects / 行执行 / 跳转
+   * ========================================================================== */
+  const FALLBACK_BG = { id: '__fallback__', name: '未知背景', css: '', image: null };
+
+  /** effects 语义：number 累加；boolean / string 赋值；key 含 . 表示命名空间变量 */
+  function applyEffects(effects) {
+    const e = obj(effects);
+    Object.keys(e).forEach((k) => {
+      const v = e[k];
+      if (typeof v === 'number' && Number.isFinite(v)) {
+        const cur = State.vars[k];
+        State.vars[k] = (typeof cur === 'number' && Number.isFinite(cur) ? cur : 0) + v;
+      } else if (typeof v === 'boolean' || typeof v === 'string') {
+        State.vars[k] = v;
+      } else if (v === null) {
+        State.vars[k] = null;
+      } else {
+        State.vars[k] = clone(v); // 其他类型（数组/对象）整体赋值，保持数据不丢
+      }
+    });
+  }
+
+  function currentScene() { return State.data.sceneMap[State.sceneId] || null; }
+
+  /** 进入场景（含背景切换 + 可选自动存档） */
+  function enterScene(sceneId, lineIdx, opts) {
+    opts = obj(opts);
+    const sc = State.data.sceneMap[sceneId] || null;
+    if (!sc) return false;
+    clearAutoTimers();
+    stopTypewriter();
+    State.sceneId = sc.id;
+    State.sceneIdx = State.data.scenes.indexOf(sc);
+    State.lineIdx = int(lineIdx, 0);
+    if (!State.visitedOrder.length || State.visitedOrder[State.visitedOrder.length - 1] !== sc.id) State.visitedOrder.push(sc.id);
+    applyBackground(sc.background);
+    el.chapterChip.textContent = sc.name;
+    el.chapterChip.classList.toggle('hidden', !sc.name);
+    if (opts.autosave !== false) autoSave();
+    return true;
+  }
+
+  /** 行签名（已读 / 存档用） */
+  function lineSignature(line, idx) {
+    const t = str(line && line.type, '');
+    const txt = str(line && line.text, '');
+    return lineHash(State.sceneId, typeof idx === 'number' ? idx : State.lineIdx, t + ':' + txt + ':' + str(line && line.endingId, ''));
+  }
+
+  /** 执行当前行；set / 未知类型会自动向前推进 */
+  function execLine() {
+    const sc = currentScene();
+    if (!sc) { fatal('当前场景不存在，已返回标题'); return; }
+    if (State.lineIdx < 0) State.lineIdx = 0;
+    if (State.lineIdx >= sc.lines.length) { nextScene(); return; }
+    if (++State.steps > 20000) { fatal('剧本执行步数异常，已停止'); return; }
+
+    const line = sc.lines[State.lineIdx] || {};
+    State.currentLine = line;
+    const type = str(line.type, '');
+
+    if (type === 'narration' || type === 'dialogue') {
+      State.phase = 'line';
+      hideChoice();
+      const text = renderTextLine(line);
+      const sig = lineSignature(line, State.lineIdx);
+      const isRead = State.readSet.has(sig);
+      if (!isRead) { State.readSet.add(sig); Persist.writeRead(); }
+      pushHistory(line, text);
+      const instant = isRead && State.settings.skipRead;
+      typeText(text, instant);
+      return;
+    }
+    if (type === 'set') {
+      applyEffects(line.effects);
+      if (State.settings.skipRead) { skipForward(); return; }
+      State.lineIdx++;
+      setTimeout(() => { if (State.phase === 'line' || State.phase === 'choice') execLine(); }, 0);
+      return;
+    }
+    if (type === 'choice') {
+      State.phase = 'choice';
+      State.pendingChoice = line;
+      State.lineIdx = State.lineIdx; // 存档仍停在本行
+      renderChoiceFor(line);
+      autoSave();
+      return;
+    }
+    if (type === 'ending') {
+      const eid = str(line.endingId, '');
+      renderEnding(State.data.endingMap[eid] || { id: eid || 'unknown', title: '未知结局', text: 'endingId 未在 endings 中定义。', kind: 'normal' });
+      return;
+    }
+    // 未知 line 类型：直接跳过
+    State.lineIdx++;
+    setTimeout(() => { if (State.phase === 'line' || State.phase === 'choice') execLine(); }, 0);
+  }
+
+  function renderChoiceFor(line) {
+    // 选项文字由 #choice-list 呈现；对话框只保留“请选择”氛围提示，避免文字重复
+    el.dbox.setAttribute('data-narration', '0');
+    el.dbox.setAttribute('data-choice', '1');
+    setSpeaker(null);
+    typeText('请选择…', true);
+    el.gameScreen.setAttribute('data-phase', 'choice');
+    renderChoice(line);
+  }
+
+  /** 前往下一个场景（当前场景行耗尽） */
+  function nextScene() {
+    const d = State.data;
+    const idx = State.sceneIdx;
+    if (idx + 1 < d.scenes.length) {
+      enterScene(d.scenes[idx + 1].id, 0);
+      execLine();
+      return;
+    }
+    // 没有显式 ending：用最后一个可用结局收尾
+    if (d.endings.length) { renderEnding(d.endings[0]); return; }
+    fatal('剧本已结束，但没有定义任何 ending。');
+  }
+
+  /** 推进：补全文字 → 下一行 */
+  function advance() {
+    if (State.uiLocked || State.modal) return;
+    if (State.phase === 'choice') return;      // 选项阶段必须点击选项
+    if (State.phase === 'ending') return;
+    if (State.phase !== 'line') return;
+    clearAutoTimers();
+    if (completeTypeIfNeeded()) return;        // 文本未打完：先补全
+    State.lineIdx++;
+    execLine();
+  }
+
+  /** 跳过模式下连续推进（用于 set 与已读快速跳过） */
+  function skipForward() {
+    let guard = 0;
+    while (guard++ < 400) {
+      const sc = currentScene();
+      if (!sc || State.lineIdx >= sc.lines.length) { nextScene(); return; }
+      const line = sc.lines[State.lineIdx] || {};
+      const t = str(line.type, '');
+      if (t === 'set') { applyEffects(line.effects); State.lineIdx++; continue; }
+      if (t === 'narration' || t === 'dialogue') {
+        const sig = lineSignature(line, State.lineIdx);
+        if (State.readSet.has(sig)) { State.lineIdx++; continue; }
+      }
+      execLine();
+      return;
+    }
+  }
+
+  /** 选择分支：应用 effects → goto */
+  function pickChoice(i) {
+    const line = State.pendingChoice;
+    if (!line) return;
+    const options = arr(State.choiceOptions);
+    if (i < 0 || i >= options.length) { toast('该选项不存在'); return; }
+    const o = obj(options[i]);
+    applyEffects(o.effects);
+    hideChoice();
+    State.pendingChoice = null;
+    const goto = str(o.goto, '');
+    if (!goto || !State.data.sceneMap[goto]) {
+      toast(`选项指向的场景「${goto || '空'}」不存在，已回到标题`);
+      setTimeout(() => { backToTitle('分支指向的场景不存在'); }, 900);
+      return;
+    }
+    State.phase = 'line';
+    enterScene(goto, 0);
+    execLine();
+  }
+
+  /** 历史记录 */
+  function pushHistory(line, text) {
+    const t = str(line.type, '');
+    const ch = t === 'dialogue' ? (State.data.charMap[str(line.speaker, '')] || null) : null;
+    State.history.push({
+      name: ch ? ch.name : (t === 'dialogue' ? str(line.speaker, '???') : '旁白'),
+      color: ch ? ch.color : '',
+      text: str(text, ''),
+      narr: t === 'narration'
+    });
+    if (State.history.length > 400) State.history.splice(0, State.history.length - 400);
+  }
+
+  /* ==========================================================================
+   * 模块 6 · Save / Load
+   * ========================================================================== */
+  function buildSave() {
+    const sc = currentScene();
+    return {
+      v: 1,
+      at: Date.now(),
+      title: State.data.meta.title,
+      sceneId: State.sceneId,
+      lineIdx: Math.max(0, State.lineIdx),
+      sceneName: sc ? sc.name : '',
+      vars: clone(State.vars) || {},
+      sprites: spriteSnapshot(),
+      bgId: sc ? sc.background : '',
+      varsCount: Object.keys(State.vars).length,
+      progress: State.visitedOrder.length
+    };
+  }
+  function slotSummary(s) {
+    if (!s) return { name: '空存档位', meta: '尚无记录', empty: true };
+    const scName = str(s.sceneName, '') || str(s.sceneId, '');
+    return {
+      name: scName || '（未知场景）',
+      meta: `${fmtTime(s.at)} · 变量 ${int(s.varsCount, 0)} 项`,
+      empty: false
+    };
+  }
+  function autoSave() {
+    if (!State.data || State.dataErr) return;
+    if (State.phase === 'title' || State.phase === 'ending') return;
+    if (!currentScene()) return;
+    LS.setJSON(KEY.autosave, buildSave());
+    refreshContinueButton();
+  }
+  function saveToSlot(i) {
+    if (!State.data) return false;
+    if (!currentScene()) { toast('当前无可存档进度'); return false; }
+    LS.setJSON(KEY.slot(i), buildSave());
+    State.hasSave = true;
+    refreshContinueButton();
+    toast(`已存入槽位 ${i}`);
+    return true;
+  }
+  function loadFrom(save) {
+    const s = obj(save);
+    if (!s.sceneId || !State.data.sceneMap[str(s.sceneId, '')]) { toast('存档已损坏：场景不存在'); return false; }
+    State.vars = obj(clone(s.vars));
+    State.history = [];
+    State.pendingChoice = null;
+    State.visitedOrder = [str(s.sceneId, '')];
+    State.steps = 0;
+    closeModal();
+    showScreen('game');
+    clearSprites();
+    const ok = enterScene(str(s.sceneId, ''), Math.max(0, int(s.lineIdx, 0)), { autosave: false });
+    if (!ok) { toast('存档已损坏：场景不存在'); backToTitle('存档损坏'); return false; }
+    restoreSprites(s.sprites);
+    State.phase = 'line';
+    // 从存档行继续执行（选项行会重新给出选项）
+    execLine();
+    updateAutoButton();
+    toast('读取成功');
+    return true;
+  }
+
+  function refreshContinueButton() {
+    const auto = Persist.readAuto();
+    const anySlot = [1, 2, 3].map((i) => Persist.readSlot(i)).filter(Boolean);
+    State.hasSave = !!(auto || anySlot.length);
+    el.btnContinue.disabled = !State.hasSave;
+    el.btnContinue.title = State.hasSave ? `自动存档：${fmtTime(auto ? auto.at : (anySlot[0] && anySlot[0].at))}` : '暂无可读存档';
+  }
+
+  /* ==========================================================================
+   * 模块 7 · Screens —— 标题 / 开始 / 回标题 / 面板内容
+   * ========================================================================== */
+  function renderTitleScreen() {
+    const d = State.data;
+    const m = d.meta;
+    el.titleMain.textContent = m.title;
+    el.titleSub.textContent = m.subtitle || (m.author ? 'by ' + m.author : '');
+    el.titleSynopsis.textContent = m.synopsis || '（本作品暂无简介）';
+    el.titleTags.innerHTML = m.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('');
+    const bits = [];
+    if (m.author) bits.push(`作者：${m.author}`);
+    if (m.version) bits.push(`v${m.version}`);
+    if (d.scenes.length) bits.push(`${d.scenes.length} 个场景`);
+    if (d.endings.length) bits.push(`${d.endings.length} 个结局`);
+    el.titleFoot.textContent = bits.join(' · ');
+
+    const warns = [];
+    if (State.fatal) warns.push(State.fatal);
+    if (!d.scenes.length) warns.push('剧本中没有任何场景（scenes 为空），无法开始游戏。请检查生成数据。');
+    if (!d.characters.length) warns.push('剧本没有角色定义（characters 为空），台词将仅显示文本。');
+    if (d.warnings.length) warns.push('数据提示：' + d.warnings.slice(0, 4).join('；') + (d.warnings.length > 4 ? ` 等 ${d.warnings.length} 条` : ''));
+    if (warns.length) { el.titleWarn.classList.remove('hidden'); el.titleWarn.innerHTML = warns.map((w) => `<div>⚠ ${esc(w)}</div>`).join(''); }
+    else { el.titleWarn.classList.add('hidden'); el.titleWarn.textContent = ''; }
+
+    el.btnStart.disabled = !d.scenes.length;
+    el.btnGallery.disabled = !d.endings.length;
+    document.title = m.title;
+    refreshContinueButton();
+  }
+
+  function backToTitle(reason) {
+    State.phase = 'title';
+    State.pendingChoice = null;
+    State.currentLine = null;
+    clearAutoTimers();
+    stopTypewriter();
+    hideChoice();
+    closeModal();
+    if (reason) State.fatal = str(reason, '');
+    showScreen('title');
+    renderTitleScreen();
+    updateAutoButton();
+  }
+  function fatal(msg) {
+    toast(msg, 2600);
+    setTimeout(() => backToTitle(msg), 700);
+  }
+
+  function startGame() {
+    const d = State.data;
+    if (!d.scenes.length) { toast('没有可播放的场景'); return; }
+    State.fatal = '';
+    State.vars = {};
+    State.history = [];
+    State.sprites = {};
+    State.pendingChoice = null;
+    State.visitedOrder = [];
+    State.steps = 0;
+    State.phase = 'line';
+    el.dbox.setAttribute('data-narration', '0');
+    el.dtext.textContent = '';
+    setSpeaker(null);
+    clearSprites();
+    showScreen('game');
+    if (!enterScene(d.start, 0)) { fatal('起始场景不存在'); return; }
+    execLine();
+    updateAutoButton();
+  }
+
+  /* ------------------------------ 设置面板 ------------------------------ */
+  function openSettings() {
+    const s = State.settings;
+    const body = `
+      <div class="field">
+        <div class="field-label">文字速度<span class="field-note">打字机逐字显示速度</span></div>
+        ${segHTML('textSpeed', [{ value: 'slow', label: '慢' }, { value: 'medium', label: '中' }, { value: 'fast', label: '快' }, { value: 'instant', label: '瞬间' }], s.textSpeed)}
+      </div>
+      <div class="field">
+        <div class="field-label">字号<span class="field-note">对话框文字大小</span></div>
+        ${segHTML('fontSize', [{ value: 'small', label: '小' }, { value: 'medium', label: '中' }, { value: 'large', label: '大' }], s.fontSize)}
+      </div>
+      <div class="field">
+        <div class="field-label">自动播放<span class="field-note">文本显示完毕后自动推进</span></div>
+        <button class="switch${s.autoPlay ? ' on' : ''}" data-toggle="autoPlay" aria-label="自动播放"></button>
+      </div>
+      <div class="field">
+        <div class="field-label">自动间隔<span class="field-note">每行停留时长</span></div>
+        ${segHTML('autoInterval', [{ value: '1200', label: '1.2s' }, { value: '2200', label: '2.2s' }, { value: '3500', label: '3.5s' }, { value: '5000', label: '5s' }], String(s.autoInterval))}
+      </div>
+      <div class="field">
+        <div class="field-label">跳过已读<span class="field-note">已读文本瞬间显示（快速推进）</span></div>
+        <button class="switch${s.skipRead ? ' on' : ''}" data-toggle="skipRead" aria-label="跳过已读"></button>
+      </div>
+      <div class="field">
+        <div class="field-label">数据<span class="field-note">存储于浏览器 localStorage</span></div>
+        <div class="seg">
+          <button class="seg-btn" data-action="clear-autosave">清空自动存档</button>
+          <button class="seg-btn" data-action="clear-all">重置全部数据</button>
+        </div>
+      </div>`;
+    openModal('settings', '设置', body, [
+      { label: '关闭', main: true, onClick: closeModal }
+    ]);
+    const wrap = el.modalRoot.querySelector('.modal');
+    wrap.querySelectorAll('[data-seg-field]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const field = b.getAttribute('data-seg-field');
+        const value = b.getAttribute('data-seg-value');
+        if (field === 'textSpeed' && SPEEDS.indexOf(value) >= 0) State.settings.textSpeed = value;
+        else if (field === 'fontSize' && ['small', 'medium', 'large'].indexOf(value) >= 0) State.settings.fontSize = value;
+        else if (field === 'autoInterval') State.settings.autoInterval = Math.min(8000, Math.max(600, num(value, 2200)));
+        Persist.writeSettings();
+        applyFontSize();
+        updateAutoButton();
+        b.parentElement.querySelectorAll('.seg-btn').forEach((x) => x.classList.toggle('on', x === b));
+        if (field === 'autoInterval' || field === 'textSpeed') {
+          // 已显示的文本按新速度立即补全，避免半截文本卡住
+          if (State.phase === 'line' && !Runtime.type.done) finishType();
+        }
+      });
+    });
+    wrap.querySelectorAll('[data-toggle]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const f = b.getAttribute('data-toggle');
+        State.settings[f] = !State.settings[f];
+        b.classList.toggle('on', !!State.settings[f]);
+        Persist.writeSettings();
+        updateAutoButton();
+      });
+    });
+    wrap.querySelectorAll('[data-action]').forEach((b) => {
+      b.addEventListener('click', () => {
+        const a = b.getAttribute('data-action');
+        if (a === 'clear-autosave') { LS.del(KEY.autosave); refreshContinueButton(); toast('自动存档已清空'); }
+        if (a === 'clear-all') {
+          LS.del(KEY.autosave);
+          [1, 2, 3].forEach((i) => LS.del(KEY.slot(i)));
+          LS.del(KEY.gallery); LS.del(KEY.read); LS.del(KEY.settings);
+          State.gallery = {}; State.readSet = new Set();
+          State.settings = Object.assign({}, DEFAULT_SETTINGS);
+          Persist.writeSettings(); applyFontSize(); updateAutoButton(); refreshContinueButton();
+          toast('全部数据已重置');
+        }
+      });
+    });
+  }
+
+  /* ------------------------------ 存档面板 ------------------------------ */
+  function openSaves() {
+    const rows = [];
+    const auto = Persist.readAuto();
+    const sum = slotSummary(auto);
+    rows.push(`<div class="slot${sum.empty ? ' empty' : ''}" data-slot="auto">
+        <div class="slot-info"><div class="slot-name">自动存档 · ${esc(sum.name)}</div><div class="slot-meta">${esc(sum.meta)}</div></div>
+        <div class="slot-actions">
+          <button class="btn btn-ghost btn-sm" data-slot-load="auto"${sum.empty ? ' disabled' : ''}>读取</button>
+          <button class="btn btn-ghost btn-sm" data-slot-del="auto"${sum.empty ? ' disabled' : ''}>删除</button>
+        </div>
+      </div>`);
+    [1, 2, 3].forEach((i) => {
+      const s = Persist.readSlot(i);
+      const m = slotSummary(s);
+      rows.push(`<div class="slot${m.empty ? ' empty' : ''}" data-slot="${i}">
+        <div class="slot-info"><div class="slot-name">槽位 ${i} · ${esc(m.name)}</div><div class="slot-meta">${esc(m.meta)}</div></div>
+        <div class="slot-actions">
+          <button class="btn btn-main btn-sm" data-slot-save="${i}"${State.playMode === 'game' ? '' : ' disabled'}>保存</button>
+          <button class="btn btn-ghost btn-sm" data-slot-load="${i}"${m.empty ? ' disabled' : ''}>读取</button>
+          <button class="btn btn-ghost btn-sm" data-slot-del="${i}"${m.empty ? ' disabled' : ''}>删除</button>
+        </div>
+      </div>`);
+    });
+    openModal('saves', '存档 / 读档', `<div class="slot-list">${rows.join('')}</div>`, [{ label: '关闭', main: true, onClick: closeModal }]);
+    const wrap = el.modalRoot.querySelector('.modal');
+    wrap.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (!(t instanceof HTMLElement)) return;
+      const sv = t.getAttribute('data-slot-save');
+      const ld = t.getAttribute('data-slot-load');
+      const dl = t.getAttribute('data-slot-del');
+      if (sv) { saveToSlot(int(sv, 1)); openSaves(); return; }
+      if (ld) {
+        const save = ld === 'auto' ? Persist.readAuto() : Persist.readSlot(int(ld, 1));
+        if (save) loadFrom(save); else toast('该槽位没有存档');
+        return;
+      }
+      if (dl) {
+        if (dl === 'auto') LS.del(KEY.autosave); else LS.del(KEY.slot(int(dl, 1)));
+        refreshContinueButton(); openSaves(); toast('已删除');
+      }
+    });
+  }
+
+  /* ------------------------------ 图鉴面板 ------------------------------ */
+  function openGallery() {
+    const d = State.data;
+    if (!d.endings.length) { toast('本作品没有结局数据'); return; }
+    const unlocked = d.endings.filter((e) => State.gallery[e.id]).length;
+    const cards = d.endings.map((e) => {
+      const got = State.gallery[e.id];
+      if (!got) {
+        return `<div class="gallery-item locked" data-kind="${esc(e.kind)}">
+            <div class="gallery-kind">???</div>
+            <div class="gallery-title">???</div>
+            <div class="gallery-text">尚未解锁的结局</div>
+            <div class="gallery-date">—</div>
+          </div>`;
+      }
+      return `<div class="gallery-item" data-kind="${esc(e.kind)}" data-ending="${esc(e.id)}">
+          <div class="gallery-kind">${esc(e.kind.toUpperCase())}</div>
+          <div class="gallery-title">${esc(e.title)}</div>
+          <div class="gallery-text">${esc(e.text)}</div>
+          <div class="gallery-date">${esc(fmtTime(got.at))}</div>
+        </div>`;
+    }).join('');
+    const head = `<div class="field-note" style="margin-bottom:10px">已解锁 ${unlocked} / ${d.endings.length}</div>`;
+    openModal('gallery', '结局图鉴', head + `<div class="gallery-grid">${cards}</div>`, [{ label: '关闭', main: true, onClick: closeModal }]);
+  }
+
+  /* ------------------------------ 历史面板 ------------------------------ */
+  function openHistory() {
+    const list = State.history;
+    const body = list.length
+      ? `<div class="history-list" data-testid="history-panel">${list.map((h) => `
+          <div class="history-entry">
+            <div class="history-who${h.narr ? ' narr' : ''}"${h.color ? ` style="color:${esc(h.color)}"` : ''}>${esc(h.name)}</div>
+            <div class="history-text">${esc(h.text)}</div>
+          </div>`).join('')}</div>`
+      : `<div class="empty-tip" data-testid="history-panel">还没有任何对话记录。<br>开始游戏后，已读文本会出现在这里。</div>`;
+    openModal('history', '历史回顾', body, [{ label: '关闭', main: true, onClick: closeModal }]);
+    const scroller = el.modalRoot.querySelector('.panel-body');
+    if (scroller) scroller.scrollTop = scroller.scrollHeight;  // 打开即滚到最新
+  }
+
+  /* ------------------------------ 菜单（Esc） ------------------------------ */
+  function openMenu() {
+    const body = `
+      <div class="slot-list">
+        <button class="btn" data-menu="continue"${State.playMode === 'game' ? '' : ' disabled'}>继续游戏</button>
+        <button class="btn" data-menu="saves">存档 / 读档</button>
+        <button class="btn" data-menu="history">历史回顾</button>
+        <button class="btn" data-menu="settings">设置</button>
+        <button class="btn" data-menu="gallery">结局图鉴</button>
+        <button class="btn btn-ghost" data-menu="title">回到标题</button>
+      </div>`;
+    openModal('menu', '菜单', body);
+    const wrap = el.modalRoot.querySelector('.modal');
+    wrap.addEventListener('click', (ev) => {
+      const t = ev.target;
+      if (!(t instanceof HTMLElement)) return;
+      const a = t.getAttribute('data-menu');
+      if (!a) return;
+      if (a === 'continue') closeModal();
+      if (a === 'saves') openSaves();
+      if (a === 'history') openHistory();
+      if (a === 'settings') openSettings();
+      if (a === 'gallery') openGallery();
+      if (a === 'title') backToTitle('');
+    });
+  }
+
+  /* ------------------------------ 自动播放状态 ------------------------------ */
+  function updateAutoButton() {
+    if (!el.qbAuto) return;
+    const on = !!State.settings.autoPlay && State.phase !== 'title' && !State.uiLocked;
+    el.qbAuto.textContent = on ? '❚❚' : '▶';
+    el.qbAuto.classList.toggle('on', on);
+    el.qbAuto.title = on ? '自动播放中（点击停止）' : '自动播放（A）';
+    if (!on) clearAutoTimers();
+  }
+  /** 文本打完后，若开启自动播放则安排推进 */
+  function scheduleAuto() {
+    if (!State.settings.autoPlay || State.uiLocked || State.phase !== 'line') return;
+    clearTimeout(Runtime.autoTextTimer);
+    Runtime.autoTextTimer = setTimeout(() => { if (State.phase === 'line' && !State.uiLocked) advance(); }, State.settings.autoInterval);
+  }
+  function toggleAuto() {
+    if (State.phase === 'title') return;
+    State.settings.autoPlay = !State.settings.autoPlay;
+    Persist.writeSettings();
+    updateAutoButton();
+    toast(State.settings.autoPlay ? '自动播放：开' : '自动播放：关');
+    if (State.settings.autoPlay && Runtime.type.done && State.phase === 'line') scheduleAuto();
+  }
+
+  /* ==========================================================================
+   * 模块 8 · Input —— 鼠标 / 触屏 / 键盘
+   * ========================================================================== */
+  function bindEvents() {
+    // ---- 标题画面 ----
+    el.btnStart.addEventListener('click', (ev) => { ev.stopPropagation(); startGame(); });
+    el.btnContinue.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      if (State.playMode !== 'title') State.playMode = 'title';
+      const auto = Persist.readAuto();
+      if (auto) { loadFrom(auto); return; }
+      const slot = [1, 2, 3].map((i) => Persist.readSlot(i)).filter(Boolean)[0];
+      if (slot) { loadFrom(slot); return; }
+      toast('暂无可读取的存档');
+    });
+    el.btnGallery.addEventListener('click', (ev) => { ev.stopPropagation(); openGallery(); });
+    el.btnSettings.addEventListener('click', (ev) => { ev.stopPropagation(); openSettings(); });
+
+    // ---- 结局画面 ----
+    el.btnEndingTitle.addEventListener('click', (ev) => { ev.stopPropagation(); backToTitle(''); });
+    el.btnEndingGallery.addEventListener('click', (ev) => { ev.stopPropagation(); openGallery(); });
+
+    // ---- 快捷工具条 ----
+    el.qbLog.addEventListener('click', (ev) => { ev.stopPropagation(); openHistory(); });
+    el.qbAuto.addEventListener('click', (ev) => { ev.stopPropagation(); toggleAuto(); });
+    el.qbSave.addEventListener('click', (ev) => { ev.stopPropagation(); saveToSlot(1); });
+    el.qbMenu.addEventListener('click', (ev) => { ev.stopPropagation(); openMenu(); });
+
+    // ---- 点击画面推进（对话框 / 立绘区域 / 整屏） ----
+    const tapAdvance = (ev) => {
+      if (State.modal || State.uiLocked) return;
+      const t = ev.target;
+      if (t instanceof Element && t.closest('button, .modal, #choice-list, a')) return;
+      advance();
+    };
+    el.dbox.addEventListener('click', (ev) => { ev.stopPropagation(); tapAdvance(ev); });
+    el.gameScreen.addEventListener('click', tapAdvance);
+
+    // ---- 键盘 ----
+    document.addEventListener('keydown', (ev) => {
+      const tag = (ev.target && ev.target.tagName) ? ev.target.tagName.toLowerCase() : '';
+      const typing = tag === 'input' || tag === 'textarea' || (ev.target && ev.target.isContentEditable);
+      if (ev.ctrlKey && (ev.key === 's' || ev.key === 'S')) {
+        ev.preventDefault();
+        if (State.playMode === 'game') saveToSlot(1); else toast('现在没有进行中的进度');
+        return;
+      }
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        if (State.modal) closeModal();
+        else if (State.playMode === 'game') openMenu();
+        return;
+      }
+      if (typing) return;
+      if (ev.key === ' ' || ev.key === 'Enter' || ev.key === 'Spacebar') {
+        if (State.modal) {
+          // 面板中：回车/空格关闭（避免阻塞推进）
+          if (ev.key === 'Enter') { ev.preventDefault(); closeModal(); }
+          return;
+        }
+        ev.preventDefault();
+        advance();
+        return;
+      }
+      const k = ev.key.toLowerCase();
+      if (k === 'l' && State.playMode === 'game') { openHistory(); return; }
+      if (k === 'a' && State.playMode === 'game') { toggleAuto(); return; }
+      if (k === 's' && State.playMode === 'game') { saveToSlot(1); return; }
+      if (State.phase === 'choice' && /^[1-9]$/.test(k)) {
+        const idx = Number(k) - 1;
+        const btns = el.choiceList.querySelectorAll('.choice-btn');
+        if (btns[idx]) btns[idx].click();
+        return;
+      }
+      if (k === 'h' && State.playMode === 'game') { openHistory(); return; }
+    });
+
+    // ---- 视口变化：重新贴合高度（iOS 地址栏 / 旋屏） ----
+    const syncHeight = () => {
+      const h = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      if (h) document.documentElement.style.setProperty('--cg-app-h', Math.round(h) + 'px');
+      if (State.phase === 'choice') requestAnimationFrame(positionChoiceList);
+    };
+    window.addEventListener('resize', syncHeight);
+    window.addEventListener('orientationchange', () => setTimeout(syncHeight, 120));
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', syncHeight);
+    syncHeight();
+  }
+
+  /* ==========================================================================
+   * 模块 9 · Boot —— 启动流程
+   * ========================================================================== */
+  function readQuery() {
+    const q = { fast: false, autostart: false, scene: '' };
+    try {
+      const sp = new URLSearchParams(location.search || '');
+      q.fast = sp.get('fast') === '1' || sp.get('fast') === 'true';
+      q.autostart = sp.get('autostart') === '1' || sp.get('autostart') === 'true';
+      q.scene = str(sp.get('scene'), '');
+      if (sp.get('instant') === '1') q.fast = true;
+    } catch (e) { /* file:// 下 URLSearchParams 依旧可用，异常时忽略 */ }
+    return q;
+  }
+
+  function init() {
+    // 1) 读数据，失败也要能渲染标题画面（绝不白屏）
+    const res = readRawData();
+    if (res.ok) State.data = normalizeData(res.data);
+    else {
+      State.dataErr = res.err;
+      State.data = normalizeData({});
+      State.fatal = res.err;
+    }
+    // 2) 主题 / 字号 / 设置
+    applyTheme();
+    applyFontSize();
+    // 3) 测试友好参数
+    const q = readQuery();
+    if (q.fast) State.settings.textSpeed = 'instant';
+    // 4) 渲染标题（始终先渲染，保证 DOM 可截图）
+    State.phase = 'title';
+    showScreen('title');
+    renderTitleScreen();
+    bindEvents();
+    updateAutoButton();
+    // 5) autostart：跳过标题直接进入 start 场景
+    if (q.autostart && State.data.scenes.length) {
+      if (q.scene && State.data.sceneMap[q.scene]) { startGame(); enterScene(q.scene, 0); execLine(); }
+      else startGame();
+    }
+    if (State.dataErr) console.warn('[galgame] 数据异常：' + State.dataErr);
+    if (State.data.warnings.length) console.warn('[galgame] 数据提示：', State.data.warnings);
+    document.documentElement.setAttribute('data-ready', '1');
+    // 便于自动化 / 调试读取内部状态（只读导出）
+    window.GALGAME = {
+      version: '1.0.0',
+      state: State,
+      advance,
+      startGame,
+      backToTitle,
+      openHistory,
+      openSettings,
+      openGallery,
+      openSaves,
+      saveToSlot,
+      loadFrom,
+      getVars: () => clone(State.vars),
+      getPosition: () => ({ sceneId: State.sceneId, lineIdx: State.lineIdx, phase: State.phase })
+    };
+  }
+
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
+})();
+</script>
+</body>
+</html>
