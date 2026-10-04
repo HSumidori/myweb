@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>部署自检 · 四中恋爱日记</title>
+<style>
+ body{margin:0;padding:18px;background:#12131a;color:#e8ecf7;font:14px/1.7 system-ui,-apple-system,"Segoe UI",sans-serif}
+ h1{font-size:18px;margin:0 0 4px} .sub{color:#8b93a7;font-size:12.5px;margin-bottom:14px}
+ .box{background:#1b1d28;border:1px solid #2a2e3d;border-radius:12px;padding:13px;margin-bottom:13px}
+ .big{font-size:14.5px;font-weight:700;padding:14px;border-radius:12px;margin-bottom:13px;line-height:1.6}
+ .ok{background:#12331f;border:1px solid #2f7a4a;color:#9be3b5}
+ .bad{background:#3a1620;border:1px solid #8a3a4d;color:#ffb3c0}
+ .warn{background:#33290f;border:1px solid #7a6220;color:#ffdf9b}
+ table{width:100%;border-collapse:collapse;font-size:12.5px}
+ td{padding:4px 6px;border-bottom:1px solid #23273a;vertical-align:top}
+ td.s{width:56px;font-weight:700} td.n{width:84px;text-align:right;color:#8b93a7}
+ .g{color:#9be3b5}.r{color:#ffb3c0}
+ code{background:#0d0e13;padding:1px 5px;border-radius:5px;font-size:11.5px;word-break:break-all}
+ pre{background:#0d0e13;padding:8px;border-radius:8px;overflow:auto;font-size:11.5px;max-height:120px;margin:6px 0 0}
+</style></head><body>
+<h1>部署自检</h1>
+<div class="sub">真的去解码每个素材，并检查服务器发回来的到底是不是素材本身</div>
+<div id="top" class="big warn">正在检查…</div>
+<div class="box"><div id="env"></div></div>
+<div class="box"><table id="tb"></table></div>
+<script>
+const ASSETS = [{"p":"assets/a-98b0bdd27113d8a9.jpg","kb":241},{"p":"assets/a-e5f732306139150b.webp","kb":53},{"p":"assets/a-51dd7e9f14f1ee5e.webp","kb":55},{"p":"assets/a-445d2607fa4e57f1.webp","kb":54},{"p":"assets/a-76d8a507a5580977.webp","kb":62},{"p":"assets/a-65fb4eaa09176b7e.webp","kb":53},{"p":"assets/a-42499e519e3a6fd3.webp","kb":35},{"p":"assets/a-8444c831935fe208.webp","kb":34},{"p":"assets/a-3ed9aeb982df5c15.webp","kb":67},{"p":"assets/a-81688040a38c918f.webp","kb":40},{"p":"assets/a-5e25801069bc4282.webp","kb":23},{"p":"assets/a-25653280280b784b.jpg","kb":128},{"p":"assets/a-342cc03ca19726a4.jpg","kb":201},{"p":"assets/a-5caeecaf680d75b3.jpg","kb":89},{"p":"assets/a-d0c2c09a676b52a2.jpg","kb":223},{"p":"assets/a-7ecbee05833421a9.jpg","kb":42},{"p":"assets/a-fcd3cbeef110a603.jpg","kb":71},{"p":"assets/a-05f27e531f226d7c.mp3","kb":7615},{"p":"assets/a-032f7a7041f4260b.mp3","kb":2879}];
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+document.getElementById('env').innerHTML =
+  '页面地址：<code>' + esc(location.href) + '</code><br>协议：<code>' + esc(location.protocol) + '</code>';
+
+// 把响应体开头的几十字节读成文本，用来识别"发回来的不是素材"
+async function sniff(res) {
+  try {
+    const buf = await res.clone().arrayBuffer();
+    const head = new TextDecoder('utf-8', { fatal: false }).decode(new Uint8Array(buf).subarray(0, 200));
+    return { head: head.replace(/[^\x20-\x7e\u4e00-\u9fa5]/g, '.'), size: buf.byteLength };
+  } catch (e) { return { head: '', size: 0, err: e.message }; }
+}
+
+function decodeImage(url) {
+  return new Promise((res) => {
+    const im = new Image();
+    im.onload = () => res({ ok: true, w: im.naturalWidth, h: im.naturalHeight });
+    im.onerror = () => res({ ok: false });
+    im.src = url;
+    setTimeout(() => res({ ok: false, timeout: true }), 8000);
+  });
+}
+function decodeAudio(url) {
+  return new Promise((res) => {
+    const a = new Audio();
+    a.preload = 'metadata';
+    a.onloadedmetadata = () => res({ ok: true, dur: a.duration });
+    a.onerror = () => res({ ok: false, code: a.error ? a.error.code : null });
+    a.src = url;
+    setTimeout(() => res({ ok: false, timeout: true }), 10000);
+  });
+}
+
+(async () => {
+  const rows = [];
+  let bad = 0, lfs = 0, tiny = 0;
+  for (const a of ASSETS) {
+    const isImg = /\.(png|jpe?g|webp|gif|avif|svg)$/i.test(a.p);
+    let status = '—', got = 0, verdict = '', okRow = false, snip = '';
+    try {
+      const r = await fetch(a.p, { cache: 'no-store' });
+      status = r.status;
+      if (r.ok) {
+        const sn = await sniff(r);
+        got = sn.size;
+        snip = sn.head;
+        // Git LFS：仓库里存的是指针文本，Pages 把这段文本当成素材发出来
+        if (/git-lfs\.github\.com\/spec/.test(sn.head)) { verdict = '✖ 这是 Git LFS 指针，不是素材本身'; lfs++; }
+        else if (/^\s*<(!doctype|html)/i.test(sn.head)) { verdict = '✖ 服务器返回的是 HTML 页面（路径不对）'; }
+        else if (got < a.kb * 1024 * 0.5) { verdict = '✖ 内容比预期小很多（' + Math.round(got / 1024) + ' KB / 预期 ' + a.kb + ' KB）'; tiny++; }
+        else {
+          const d = isImg ? await decodeImage(a.p) : await decodeAudio(a.p);
+          if (d.ok) { verdict = isImg ? ('✔ 解码成功 ' + d.w + '×' + d.h) : ('✔ 可播放 ' + (d.dur ? d.dur.toFixed(0) + ' 秒' : '')); okRow = true; }
+          else verdict = '✖ 拿到了数据但解不开' + (d.code ? '（音频错误码 ' + d.code + '）' : '');
+        }
+      } else { verdict = '✖ HTTP ' + status; }
+    } catch (e) { status = 'ERR'; verdict = '✖ ' + e.message; }
+    if (!okRow) bad++;
+    rows.push({ ...a, status, got, verdict, ok: okRow, snip });
+  }
+
+  document.getElementById('tb').innerHTML = rows.map((r) => {
+    const cls = r.ok ? 'g' : 'r';
+    return '<tr><td class="s ' + cls + '">' + r.status + '</td>'
+      + '<td>' + esc(r.p) + '<br><span class="' + cls + '">' + esc(r.verdict) + '</span>'
+      + (r.snip && !r.ok ? '<pre>' + esc(r.snip.slice(0, 160)) + '</pre>' : '')
+      + '</td><td class="n">' + (r.got ? Math.round(r.got / 1024) + ' KB' : '') + '</td></tr>';
+  }).join('');
+
+  const top = document.getElementById('top');
+  if (location.protocol === 'file:') {
+    top.className = 'big warn';
+    top.textContent = '⚠ 你是用 file:// 直接双击打开的。浏览器会因跨源策略拒绝加载素材 —— 这不是部署的问题，请通过 https 访问站点。';
+  } else if (lfs > 0) {
+    top.className = 'big bad';
+    top.textContent = '✖ 有 ' + lfs + ' 个文件是 Git LFS 指针而不是素材本身。'
+      + 'GitHub Pages **不提供 LFS 内容**，所以图片和音乐都出不来。'
+      + '解决：换用「单文件保底版」（所有素材内联，不受影响），或者关掉 LFS 重新提交这些文件。';
+  } else if (bad === ASSETS.length) {
+    top.className = 'big bad';
+    top.textContent = '✖ 全部 ' + ASSETS.length + ' 个素材都取不到 —— 最可能是 assets/ 目录没有跟着传上去。';
+  } else if (bad > 0) {
+    top.className = 'big bad';
+    top.textContent = '✖ ' + bad + ' / ' + ASSETS.length + ' 个素材有问题（看下表）。';
+  } else {
+    top.className = 'big ok';
+    top.textContent = '✔ ' + ASSETS.length + ' 个素材全部正常（能取到、能解码）。如果游戏里还是看不到，请把这一页截图发我。';
+  }
+})();
+</script></body></html>
